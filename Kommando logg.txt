@@ -1,0 +1,30 @@
+
+📊 AI TRADING SYSTEM – KOMMANDON
+
+🔹 Hämta förslag
+vilka aktier ska jag köpa?
+→ Visar TOP HIGH QUALITY + LOW PRICE med entry, stop & signal
+
+🔹 Köp aktie
+köp SAND.ST
+→ Lägger till aktien i din portfölj (my_trades.txt)
+
+🔹 Sälj aktie
+sälj SAND.ST
+→ Tar bort aktien från din portfölj
+
+🔹 Visa portfölj
+mina trades
+→ Visar alla aktier du har valt att köpa
+
+🔹 Live uppföljning
+följ mina trades
+→ Visar real‑time status:
+   - HOLD ✅
+   - WARNING ⚠️
+   - SELL ❌
+
+💡 Tips:
+- Du väljer själv vad du köper
+- Systemet följer bara dina val
+- AI ger förslag – du tar besluten
