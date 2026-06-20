@@ -1,0 +1,6 @@
+
+flask
+yfinance
+requests
+llama-index
+openai
