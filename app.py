@@ -27,175 +27,94 @@ def load_users():
 
 
 def create_user(u,pw):
-    users = load_users()
-    if u in users:
+    if u in load_users():
         return False
-
     with open(USERS_FILE,"a") as f:
         f.write(f"{u}|{hash_pw(pw)}\n")
     return True
 
 
-# ✅ LOAD DATA
+# ✅ DATA + AI
 def load_data():
 
-    stocks=[]
-    crypto=[]
+    assets=[]
 
     for l in open("stock_data/stocks.txt"):
         if "|" in l:
             t,name,p,_,g,plat = l.strip().split("|")
 
-            item={
-                "t":t,
-                "name":name,
-                "p":p,
-                "g":round(float(g)*100,1),
-                "plat":plat
-            }
+            try:
+                res = subprocess.run(
+                    ["python","main.py",f"signal {t}"],
+                    capture_output=True,text=True
+                ).stdout.strip()
 
-            if plat=="SAFELLO":
-                crypto.append(item)
-            else:
-                stocks.append(item)
+                sig,risk,move = res.split("|")
+            except:
+                sig,risk,move="HOLD","MEDIUM","NORMAL"
+
+            alert = "🔥 BUY SPIKE" if move=="BUY_SPIKE" else \
+                    "⚠️ SELL DROP" if move=="SELL_DROP" else ""
+
+            score = 3 if sig=="BUY" else 2 if sig=="HOLD" else 1
+
+            assets.append({
+                "t":t,"name":name,
+                "p":float(p),
+                "g":round(float(g)*100,1),
+                "s":sig,
+                "r":risk,
+                "alert":alert,
+                "plat":plat,
+                "score":score
+            })
+
+    assets = sorted(assets, key=lambda x:(x["score"],x["g"]), reverse=True)
+
+    stocks=[x for x in assets if x["plat"]=="AVANZA"]
+    crypto=[x for x in assets if x["plat"]=="SAFELLO"]
 
     return stocks, crypto
 
 
-# ✅ PORTFÖLJ PER USER
+# ✅ PORTFÖLJ + AI
 def portfolio(user):
 
-    result=[]
+    items=[]
 
     for l in open("stock_data/my_trades.txt"):
-        parts = l.strip().split("|")
+        p = l.strip().split("|")
 
-        if len(parts) >= 2:
-            u,ticker = parts[0], parts[1]
+        if len(p) >= 4:
+            u,t,entry,stop = p[0],p[1],float(p[2]),float(p[3])
 
-            if u == user:
-                result.append(ticker)
+            if u != user:
+                continue
 
-    return result
+            try:
+                curr = subprocess.run(
+                    ["python","main.py",f"signal {t}"],
+                    capture_output=True,text=True
+                ).stdout.strip()
 
+                sig,_,_ = curr.split("|")
+            except:
+                sig="HOLD"
 
-# ✅ LOGIN PAGE
-LOGIN_HTML = """
-<h2>Login</h2>
+            rec = "KÖP MER" if sig=="BUY" else "SÄLJ" if sig=="SELL" else "BEHÅLL"
 
-<form method="post">
-<input name="username" placeholder="Username"><br>
-<input name="password" type="password"><br>
+            items.append({
+                "t":t,
+                "entry":entry,
+                "stop":stop,
+                "rec":rec
+            })
 
-<button name="action" value="login">Login</button>
-<button name="action" value="create">Create</button>
-</form>
-
-<p>{{msg}}</p>
-"""
-
-
-# ✅ DASHBOARD
-HTML = """
-<h1>Trading Dashboard</h1>
-
-<h2>Aktier</h2>
-{% for s in stocks %}
-{{s.name}}
-
-<form method="post">
-<input type="hidden" name="cmd" value="buy|{{user}}|{{s.t}}">
-<button>Köp</button>
-</form>
-
-{% endfor %}
-
-<h2>Krypto</h2>
-{% for s in crypto %}
-{{s.name}}
-
-<form method="post">
-<input type="hidden" name="cmd" value="buy|{{user}}|{{s.t}}">
-<button>Köp</button>
-</form>
-
-{% endfor %}
-
-<h2>Din portfölj</h2>
-{% for s in owned %}
-{{s}}
-
-<form method="post">
-<input type="hidden" name="cmd" value="sell|{{user}}|{{s}}">
-<button>Sälj</button>
-</form>
-
-{% endfor %}
-
-a href="/logout">Logout</a>
-"""
+    return items
 
 
-@app.route("/", methods=["GET","POST"])
-def login():
+# ✅ INVEST PLAN (EXAKT ANTAL)
+def investment_plan(amount):
 
-    msg=""
+    stocks,_ = load_data()
 
-    if request.method=="POST":
-        u = request.form.get("username")
-        pw = request.form.get("password")
-        action = request.form.get("action")
-
-        users = load_users()
-
-        if action=="create":
-            if create_user(u,pw):
-                msg="Account created"
-            else:
-                msg="User exists"
-
-        elif action=="login":
-            if users.get(u)==hash_pw(pw):
-                session["user"]=u
-                return redirect("/dashboard")
-            else:
-                msg="Wrong login"
-
-    return render_template_string(LOGIN_HTML,msg=msg)
-
-
-@app.route("/dashboard")
-def dashboard():
-
-    if "user" not in session:
-        return redirect("/")
-
-    s,c = load_data()
-    o = portfolio(session["user"])
-
-    return render_template_string(
-        HTML,
-        stocks=s,
-        crypto=c,
-        owned=o,
-        user=session["user"]
-    )
-
-
-@app.route("/", methods=["POST"])
-def run():
-
-    cmd = request.form.get("cmd")
-
-    subprocess.run(["python","main.py",cmd])
-
-    return redirect("/dashboard")
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
-    
-
-app.run(host="0.0.0.0", port=10000)
