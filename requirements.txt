@@ -2,6 +2,7 @@
 flask
 yfinance
 requests
+feedparser
 llama-index
 openai==1.0.0
 
