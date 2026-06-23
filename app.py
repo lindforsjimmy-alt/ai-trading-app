@@ -261,6 +261,8 @@ def get_link(t):
 @app.route("/dashboard", methods=["GET","POST"])
 def dashboard():
 
+    print("METHOD:", request.method)
+
     user = session.get("user")
     if not user:
         return redirect("/login")
