@@ -160,7 +160,7 @@ def get_rsi_score(price):
     return 0
 
 def get_signal(price):
-    if price < 100:
+    if price < 300:
         return "BUY"
     elif price > 1000:
         return "SELL"
@@ -274,7 +274,7 @@ def dashboard():
 
     ranked = sorted(ranked, key=lambda x: x["score"], reverse=True)
 
-    buys = [s for s in ranked if s["signal"] == "BUY"][:top_n]
+    buys = ranked[:top_n]
 
     per = int(amount)/len(buys) if amount.isdigit() and buys else 0
 
