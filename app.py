@@ -111,8 +111,8 @@ def get_market_assets():
                 "price": c["current_price"]
             })
     except:
-
         pass
+
 
     market_cache["market"] = (assets, now)
 
