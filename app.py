@@ -263,9 +263,9 @@ def get_link(t):
 # ===== DASHBOARD =====
 @app.route("/dashboard", methods=["GET","POST"])
 def dashboard():
-
+    
     print("METHOD:", request.method)
-
+    
     user = session.get("user")
     if not user:
         return redirect("/login")
@@ -277,8 +277,26 @@ def dashboard():
     ai_risk = request.form.get("ai_risk","medium")
     pf_risk = request.form.get("pf_risk","medium")
     top_n = int(request.form.get("top_n", 5))
+    
     assets = get_market_assets()
-    print("ASSETS COUNT:", len(assets))
+    print("ASSETS COUNT (first):", len(assets))
+
+    # ✅ Retry (fix för Render sleep)
+    if not assets:
+        print("Retrying fetch...")
+        time.sleep(2)
+        assets = get_market_assets()
+        print("ASSETS COUNT (retry):", len(assets))
+
+    # ✅ Fallback (sista säkerhet)
+    if not assets:
+        print("⚠️ Using fallback data")
+        assets = [
+            {"t": "AAPL", "name": "Apple", "price": 180},
+            {"t": "MSFT", "name": "Microsoft", "price": 350},
+            {"t": "NVDA", "name": "Nvidia", "price": 1200}
+        ]
+
     
     pf = portfolio(user)
 
