@@ -397,7 +397,7 @@ button {{
 <hr>
 
 
-<form method="post">
+<form method="POST" action="/dashboard">
 
 Kapital:
 <input name="amount" value="{amount}" maxlength="15" style="width:120px;">
