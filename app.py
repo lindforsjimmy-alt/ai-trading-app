@@ -2,7 +2,7 @@ from flask import Flask, redirect, session, request
 import os, requests, time, feedparser, math, hashlib
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = "super_secret_trading_key_123"
 
 # ===== FILES =====
 DATA_FILE = "stock_data/my_trades.txt"
