@@ -61,10 +61,12 @@ def get_stop_loss(price, risk):
 def get_market_assets():
     now = time.time()
 
+    
     if "market" in market_cache:
         data, t = market_cache["market"]
-        if now - t < MARKET_CACHE_TIME:
+        if data and now - t < MARKET_CACHE_TIME:
             return data
+
 
     assets = []
 
@@ -135,7 +137,7 @@ def get_news_score(t):
             return score
 
     try:
-        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}")
+        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}"</a>)
 
         if not hasattr(feed, "entries"):
             return 0
@@ -265,6 +267,8 @@ def dashboard():
     pf_risk = request.form.get("pf_risk","medium")
     top_n = int(request.form.get("top_n", 5))
     assets = get_market_assets()
+    print("ASSETS COUNT:", len(assets))
+    
     pf = portfolio(user)
 
     ranked = []
