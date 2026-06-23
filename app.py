@@ -137,7 +137,7 @@ def get_news_score(t):
             return score
 
     try:
-        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}"</a>)
+        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}")
 
         if not hasattr(feed, "entries"):
             return 0
