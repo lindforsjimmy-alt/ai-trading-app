@@ -254,7 +254,9 @@ def dashboard():
     if not user:
         return redirect("/login")
 
-    amount = request.form.get("amount","")
+    amount = request.form.get("amount") or "10000"
+    print("AMOUNT:", amount)
+
     ai_strategy = request.form.get("ai_strategy","short")
     ai_risk = request.form.get("ai_risk","medium")
     pf_risk = request.form.get("pf_risk","medium")
@@ -275,8 +277,13 @@ def dashboard():
     ranked = sorted(ranked, key=lambda x: x["score"], reverse=True)
 
     buys = ranked[:top_n]
+    
+    try:
+        per = int(amount) / len(buys) if buys else 0
+    except:
+        per = 0
 
-    per = int(amount)/len(buys) if amount.isdigit() and buys else 0
+
 
     html = f"""
 <html>
