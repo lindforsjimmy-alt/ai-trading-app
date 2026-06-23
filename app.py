@@ -58,15 +58,14 @@ def get_stop_loss(price, risk):
 
 
 # ===== MARKET =====
+
 def get_market_assets():
     now = time.time()
 
-    
     if "market" in market_cache:
         data, t = market_cache["market"]
         if data and now - t < MARKET_CACHE_TIME:
             return data
-
 
     assets = []
 
@@ -81,10 +80,15 @@ def get_market_assets():
     ]
 
     symbols_str = ",".join(symbols)
+
     url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols_str}"
 
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
     try:
-        r = requests.get(url).json()
+        r = requests.get(url, headers=headers, timeout=5).json()
         res = r["quoteResponse"]["result"]
 
         for item in res:
@@ -97,12 +101,15 @@ def get_market_assets():
                     "name": symbol,
                     "price": price
                 })
-    except:
-        pass
+    except Exception as e:
+        print("YAHOO ERROR:", e)
 
-    
     try:
-        data = requests.get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd").json()
+        data = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd",
+            headers=headers,
+            timeout=5
+        ).json()
 
         for c in data[:15]:
             assets.append({
@@ -110,15 +117,14 @@ def get_market_assets():
                 "name": c["name"],
                 "price": c["current_price"]
             })
-    except:
-        pass
+    except Exception as e:
+        print("COINGECKO ERROR:", e)
 
+    print("FINAL ASSETS:", len(assets))  # ✅ debug
 
     market_cache["market"] = (assets, now)
 
     return assets
-
-
 
 # ===== AI =====
 def get_trend_score(price):
