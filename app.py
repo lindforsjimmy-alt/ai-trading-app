@@ -98,8 +98,10 @@ def get_market_assets():
     except:
         pass
 
+    
     try:
         data = requests.get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd").json()
+
         for c in data[:15]:
             assets.append({
                 "t": c["symbol"].upper(),
@@ -107,6 +109,7 @@ def get_market_assets():
                 "price": c["current_price"]
             })
     except:
+
         pass
 
     market_cache["market"] = (assets, now)
