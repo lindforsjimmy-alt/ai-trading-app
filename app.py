@@ -129,6 +129,18 @@ def get_market_assets():
 
     return assets
 
+# ===== HISTORICAL DATA =====
+def get_historical_data(symbol, period):
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={period}&interval=1d"
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    try:
+        r = requests.get(url, headers=headers, timeout=5).json()
+        return r
+    except:
+        return None
+
 # ===== AI =====
 def get_trend_score(price):
     if price < 50: return 2
@@ -276,6 +288,8 @@ def dashboard():
     ai_strategy = request.form.get("ai_strategy","short")
     ai_risk = request.form.get("ai_risk","medium")
     pf_risk = request.form.get("pf_risk","medium")
+    period = request.form.get("period", "3m")
+    print("PERIOD:", period)
     top_n = int(request.form.get("top_n", 5))
     
     assets = get_market_assets()
@@ -430,6 +444,18 @@ Strategi:
 <option value="short">Kort</option>
 <option value="long">Lång</option>
 </select>
+
+
+Tid:
+<select name="period">
+    <option value="1d">1 dag</option>
+    <option value="1w">1 vecka</option>
+    <option value="3m">3 månader</option>
+    <option value="6m">6 månader</option>
+    <option value="1y">1 år</option>
+    <option value="3y">3 år</option>
+</select>
+
 
 Risk:
 <select name="ai_risk">
