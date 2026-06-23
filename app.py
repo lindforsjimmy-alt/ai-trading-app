@@ -2,6 +2,7 @@ from flask import Flask, redirect, session, request
 import os, requests, time, feedparser, math, hashlib
 
 app = Flask(__name__)
+app.permanent_session_lifetime = timedelta(hours=12)
 app.secret_key = "super_secret_trading_key_123"
 
 # ===== FILES =====
@@ -665,6 +666,7 @@ def login():
 
             if check_user(email, password):
                 session["user"] = email
+                session.permanent = True
                 return redirect("/dashboard")
             else:
                 msg = "Fel login"
