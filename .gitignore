@@ -1,0 +1,6 @@
+ 
+__pycache__/
+*.pyc
+stock_data/
+.env
+users.txt
