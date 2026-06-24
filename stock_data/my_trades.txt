@@ -37,3 +37,9 @@ jimmy|USDS|909|0.99964
 jimmy|RAIN|62940|0.01444372
 jimmy|LEO|95|9.55
 lindfors.jimmy@outlook.com|USDT|910|0.998853
+lindfors.jimmy@outlook.com|USDT|2002|0.998824
+lindfors.jimmy@outlook.com|USDT|3000|0.998876
+lindfors.jimmy@outlook.com|USDT|8000|0.998876
+lindfors.jimmy@outlook.com|USDT|100000|0.998876
+lindfors.jimmy@outlook.com|RAIN|213177|0.01563642
+lindfors.jimmy@outlook.com|TRX|6081|0.328862

@@ -187,13 +187,13 @@ def get_rsi_score(price):
 
 def get_signal(price):
     if price < 300:
-        return "BUY"
+        return "KÖP"
     elif price > 1000:
-        return "SELL"
-    return "WATCH"
+        return "SÄLJ"
+    return "AVVAKTA KÖP"
 
 def get_score(sig, price, t):
-    base = 80 if sig == "BUY" else 60 if sig == "WATCH" else 30
+    base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
     val = base \
         + (get_trend_score(price) * 5) \
@@ -206,9 +206,9 @@ def get_reason(sig, price, t):
 
     reasons = []
 
-    if sig == "BUY":
+    if sig == "KÖP":
         reasons.append("Trend visar köpläge")
-    elif sig == "SELL":
+    elif sig == "SÄLJ":
         reasons.append("Hög värdering")
     else:
         reasons.append("Neutral trend")
@@ -225,11 +225,48 @@ def get_reason(sig, price, t):
     elif news_score < 0:
         reasons.append("Negativa nyheter")
 
-    reasons.append(f"Se nyheter: https://news.google.com/rss/search?q={t}")
+    return "\n".join(reasons)
 
-    return "\\n".join(reasons)
+
+# ===== PORTFOLIO AI =====
+def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, Strategi):
+
+    news = get_news_score(t)
+    trend = get_trend_score(current_price)
+
+    # ===== Strategi =====
+    if Strategi == "short":
+        take_profit = 8
+        stop_loss = -4
+
+    elif Strategi == "long":
+        take_profit = 20
+        stop_loss = -12
+
+
+    if pl_pct >= take_profit:
+        return "SÄLJ", "Take profit target reached"
+
+    if pl_pct <= stop_loss:
+        return "SÄLJ", "Stop-loss triggered"
+
+    if news < -1:
+        return "SÄLJ", "Negative news"
+
+    if trend < -1:
+        return "SÄLJ", "Weak trend"
+
+    if pl_pct > 0 and news > 1 and trend > 0:
+        return "KÖP MER", "Strong trend + positive news"
+
+    if -5 < pl_pct < 5 and news > 0:
+        return "KÖP MER", "Possible recovery"
+
+    return "Avvakta", "No strong signal"
+
 
 # ===== PORTFOLIO =====
+
 def portfolio(user):
     data={}
     with open(DATA_FILE) as f:
@@ -285,10 +322,18 @@ def dashboard():
     amount = request.form.get("amount") or "10000"
     print("AMOUNT:", amount)
 
-    ai_strategy = request.form.get("ai_strategy","short")
+    ai_Strategi = request.form.get("ai_Strategi","short")
     ai_risk = request.form.get("ai_risk","medium")
     pf_risk = request.form.get("pf_risk","medium")
     period = request.form.get("period", "3m")
+
+
+    # ===== AUTO Strategi → PERIOD =====
+    if ai_Strategi == "short":
+        period = "1w"
+    elif ai_Strategi == "long":
+        period = "1y"
+
     print("PERIOD:", period)
     top_n = int(request.form.get("top_n", 5))
     
@@ -311,8 +356,33 @@ def dashboard():
             {"t": "NVDA", "name": "Nvidia", "price": 1200}
         ]
 
+    print("FINAL ASSETS USED:", len(assets))
+
+# ===== HANDLE BUY / SELL =====
+    if request.method == "POST":
+
+        for s in assets:
+            t = s["t"]
+
+            # ✅ BUY
+            if f"buy_{t}" in request.form:
+                qty = request.form.get(f"buyqty_{t}")
+
+                if qty and qty.isdigit():
+                    buy(user, t, int(qty), s["price"])
+                    print("BOUGHT:", t, qty)
+
+            # ✅ SELL
+            if f"sell_{t}" in request.form:
+                qty = request.form.get(f"sellqty_{t}")
+
+                if qty and qty.isdigit():
+                    sell(user, t, int(qty))
+                    print("SOLD:", t, qty)
     
     pf = portfolio(user)
+    total_pl = 0
+    total_start_value = 0
 
     ranked = []
     for s in assets:
@@ -332,8 +402,6 @@ def dashboard():
         per = int(amount) / len(buys) if buys else 0
     except:
         per = 0
-
-
 
     html = f"""
 <html>
@@ -384,13 +452,10 @@ button {{
     margin-top: 5px;
 }}
 
-
 .small-btn {{
     width: auto;
     padding: 5px 8px;
 }}
-
-
 
 .buy-btn {{
     background: green;
@@ -440,22 +505,10 @@ Kapital:
 <input name="amount" value="{amount}" maxlength="15" style="width:120px;">
 
 Strategi:
-<select name="ai_strategy">
+<select name="ai_Strategi">
 <option value="short">Kort</option>
 <option value="long">Lång</option>
 </select>
-
-
-Tid:
-<select name="period">
-    <option value="1d">1 dag</option>
-    <option value="1w">1 vecka</option>
-    <option value="3m">3 månader</option>
-    <option value="6m">6 månader</option>
-    <option value="1y">1 år</option>
-    <option value="3y">3 år</option>
-</select>
-
 
 Risk:
 <select name="ai_risk">
@@ -464,7 +517,7 @@ Risk:
 <option value="high">Hög</option>
 </select>
 
-Antal:
+Antal AI-rekommendationer:
 <select name="top_n">
 <option>3</option>
 <option>5</option>
@@ -477,7 +530,7 @@ Antal:
 <br><br>
 
 <button type="submit" class="small-btn">
-Analyze
+Analysera
 </button>
 
 </form>
@@ -504,8 +557,8 @@ Score 0–100 (AI-betyg baserat på trend, nyheter och risk)
 <div class="container">
 """
 
-    # ===== BUY =====
-    html += "<div class='box'><h3>BUY</h3>"
+    # ===== KÖP =====
+    html += "<div class='box'><h3>KÖP</h3>"
 
     for s in buys:
         qty = max(1, int(per/s["price"])) if per else "-"
@@ -526,7 +579,7 @@ AI: {s['signal']}<br>
 AI föreslår: {ai_qty} st | Stop-loss: {sl} | {get_link(s['t'])}<br><br>
 <input name="buyqty_{s['t']}" style="width:60px;">
 <button class="small-btn" name="buy_{s['t']}">
-BUY
+Köp
 </button>
 </form>
 <hr>
@@ -534,11 +587,11 @@ BUY
 
     html += "</div>"
 
-    # ===== WATCH =====
-    html += "<div class='box'><h3>WATCH</h3>"
+    # ===== AVVAKTA KÖP =====
+    html += "<div class='box'><h3>AVVAKTA KÖP</h3>"
 
     for s in ranked:
-        if s["signal"] == "WATCH":
+        if s["signal"] == "AVVAKTA KÖP":
             qty = max(1, int(per/s["price"])) if per else "-"
             ai_qty = qty
 
@@ -558,7 +611,7 @@ AI föreslår: {ai_qty} st | Stop-loss: {sl} | {get_link(s['t'])}<br><br>
 
 <input name="buyqty_{s['t']}" style="width:60px;">
 <button class="small-btn" name="buy_{s['t']}">
-BUY
+Köp
 </button>
 </form>
 <hr>
@@ -567,12 +620,13 @@ BUY
     html += "</div></div>"
 
     # ===== PORTFÖLJ =====
-    html += "<h2>Min portfölj</h2>"
+
+    html += "<h2>Min portfölj</h2>"        
 
     html += f"""
 <form method="post">
 Strategi:
-<select name="pf_strategy">
+<select name="pf_Strategi">
 <option value="short">Kort</option>
 <option value="long">Lång</option>
 </select><br>
@@ -584,43 +638,108 @@ Risk:
 <option value="high">Hög</option>
 </select><br>
 
+Current Strategi period: <b>{period}</b><br>
+
+Time Range:
+<select name="period">
+    <option value="1d">1 dag</option>
+    <option value="1w">1 vecka</option>
+    <option value="3m">3 månader</option>
+    <option value="6m">6 månader</option>
+    <option value="1y">1 år</option>
+    <option value="3y">3 år</option>
+</select>
+
 <button type="submit" class="small-btn">Update</button>
 </form><hr>
 """
 
     html += "<div style='display:flex;'>"
 
-    sell_col = "<div style='width:33%'><h3>SELL</h3>"
-    buy_col  = "<div style='width:33%'><h3>BUY MORE</h3>"
-    hold_col = "<div style='width:33%'><h3>HOLD</h3>"
+    sell_col = "<div style='width:33%'><h3>SÄLJ</h3>"
+    buy_col  = "<div style='width:33%'><h3>KÖP MER</h3>"
+    hold_col = "<div style='width:33%'><h3>Avvakta</h3>"
 
     for s in pf:
-        price = next((x["price"] for x in ranked if x["t"] == s["t"]), 0)
-        sig = get_signal(price)
-        sl = get_stop_loss(price, pf_risk)
+        current_price = next((x["price"] for x in ranked if x["t"] == s["t"]), 0)
+
+        hist = get_historical_data(s["t"], period)
+
+        start_price = current_price
+
+        if hist:
+            try:
+                prices = hist["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+                start_price = prices[0] if prices and prices[0] else current_price
+            except:
+                pass
+
+        pl_value = (current_price - start_price) * s["qty"]
+
+        pl_pct = ((current_price - start_price) / start_price * 100) if start_price else 0
+
+        decision, reason = portfolio_ai_decision(
+            pl_pct,
+            current_price,
+            start_price,
+            s["t"],
+            pf_risk,
+            ai_Strategi
+
+        )
+
+        total_pl += pl_value
+        total_start_value += start_price * s["qty"]
+
+        sig = get_signal(current_price)
+        sl = get_stop_loss(current_price, pf_risk)
 
         block = f"""
+
 <form method="post" style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
 <b>{s['t']}</b> ({s['qty']})<br>
-Pris: {price}<br>
+Pris: {current_price}<br>
+
+P/L: 
+<span style="color:{'green' if pl_value >= 0 else 'red'}">
+{round(pl_value, 2)} ({round(pl_pct, 2)}%)
+</span><br>
+
+Decision: <b style="color:{'red' if decision=='SÄLJ' else 'green' if decision=='KÖP MER' else 'orange'}">
+{decision}</b><br>
+
+Reason: {reason}<br>
+
 Stop-loss: {sl}<br>
 {get_link(s['t'])}<br>
 
 Köp <input name="buyqty_{s['t']}">
-<button class="small-btn" name="buy_{s['t']}">BUY</button><br>
+<button class="small-btn" name="buy_{s['t']}">KÖP</button><br>
 
 Sälj <input name="sellqty_{s['t']}">
-<button class="small-btn" name="sell_{s['t']}">SELL</button>
+<button class="small-btn" name="sell_{s['t']}">SÄLJ</button>
 </form>
 <hr>
 """
 
-        if sig == "SELL":
+        if decision == "SÄLJ":
             sell_col += block
-        elif sig == "BUY":
+        elif decision == "KÖP MER":
             buy_col += block
         else:
             hold_col += block
+
+
+    total_pct = (total_pl / total_start_value * 100) if total_start_value else 0
+
+    html += f"""
+    <p>
+    <b>P/L:</b>
+    <span style="color:{'green' if total_pl >= 0 else 'red'}">
+    {round(total_pl, 2)} ({round(total_pct, 2)}%)
+    </span>
+    </p>
+    """
 
     html += sell_col + "</div>" + buy_col + "</div>" + hold_col + "</div></div>"
 
@@ -805,14 +924,123 @@ def login():
     </body>
     </html>
     """
-# ===== FORGOT PASSWORD =====# ===== FORGET", "POST"])
+
+# ✅ ===== CHANGE PASSWORD =====
+@app.route("/change_password", methods=["GET", "POST"])
+def change_password():
+
+    msg = ""
+
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+
+    if request.method == "POST":
+        new_password = request.form.get("new_password")
+
+        if new_password:
+
+            new_hash = hash_password(new_password)
+
+            lines = open(USERS_FILE).readlines()
+            new_lines = []
+
+            for l in lines:
+                email, pwd = l.strip().split("|")
+
+                if email == user:
+                    new_lines.append(f"{email}|{new_hash}\n")
+                else:
+                    new_lines.append(l)
+
+            open(USERS_FILE, "w").writelines(new_lines)
+
+            msg = "✅ Password updated successfully"
+
+    return f"""
+    <h2>Change Password</h2>
+
+    <form method="post">
+        New password:<br>
+        <input type="password" name="new_password" required><br><br>
+
+        <button>Update</button>
+    </form>
+
+    <p>{msg}</p>
+
+    <a href="/dashboard">Back</a>
+    """
+
+# ===== APPROVAL EMAIL =====
+def send_approval_email(new_user_email):
+
+    sender = "YOUR_MAIL@outlook.com"
+    password = "APP_PASSWORD"
+
+    approve_link = f"http://localhost:10000/approve?email={new_user_email}"
+    reject_link  = f"http://localhost:10000/reject?email={new_user_email}"
+
+    body = f"""
+Ny användare vill registrera:
+
+{new_user_email}
+
+✅ Approve:
+{approve_link}
+
+❌ Reject:
+{reject_link}
+"""
+
+    msg = MIMEText(body)
+    msg["Subject"] = "Godkänn användare"
+    msg["From"] = sender
+    msg["To"] = "lindfors.jimmy@outlook.com"
+
+    try:
+        server = smtplib.SMTP("smtp.office365.com", 587)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        print("Approval mail error:", e)
+
+
+# ===== RESET EMAIL =====
+def send_reset_email(email):
+
+    sender = "YOUR_MAIL@outlook.com"
+    password = "APP_PASSWORD"
+
+    body = f"Password reset requested for: {email}"
+
+    msg = MIMEText(body)
+    msg["Subject"] = "Password Reset"
+    msg["From"] = sender
+    msg["To"] = email
+
+    try:
+        server = smtplib.SMTP("smtp.office365.com", 587)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        print("RESET MAIL SENT TO:", email)
+    except Exception as e:
+        print("Reset mail error:", e)
+
+# ===== FORGOT PASSWORD =====
+@app.route("/forgot", methods=["GET", "POST"])
 def forgot():
 
     msg = ""
 
     if request.method == "POST":
         email = request.form.get("email")
-        msg = f"Återställning skickad till {email}"
+        send_reset_email(email)
+        msg = f"✅ Mail skickat till {email}"
 
     return f"""
     <h2>Forgot Password</h2>
@@ -827,7 +1055,6 @@ def forgot():
 
     <a href="/login">Tillbaka</a>
     """
-
 
 if __name__=="__main__":
     port = int(os.environ.get("PORT", 10000))
