@@ -321,11 +321,12 @@ def get_ma_score(prices):
     return 0
 
 # ===== AI DAILY SCAN =====
+# ===== AI DAILY SCAN =====
 def run_daily_ai():
 
     now = time.time()
 
-    # ✅ om redan körd idag → returnera cache
+    # ✅ cache
     if ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
         return ai_cache["data"]
 
@@ -334,12 +335,11 @@ def run_daily_ai():
     assets = get_market_assets()
     result = []
 
-    # ✅ LOOP (rätt indent)
     for s in assets:
         price = s.get("price", 0)
         sig = get_signal(price)
 
-        # ✅ HÄMTA HISTORIK
+        # ✅ historik
         hist = get_historical_data(s["t"], "1mo")
 
         prices = []
@@ -351,13 +351,13 @@ def run_daily_ai():
             except:
                 prices = []
 
-        # ✅ NY TREND + RSI
+        # ✅ indikatorer
         trend_score = get_trend_score_from_history(prices)
         rsi_score = get_rsi_score_from_history(prices)
         news_score = get_news_score(s["t"])
         ma_score = get_ma_score(prices)
 
-        # ✅ NY SCORE
+        # ✅ base score
         base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
         total_score = (
@@ -365,8 +365,14 @@ def run_daily_ai():
             + (trend_score * 5)
             + (rsi_score * 5)
             + (news_score * 3)
-	    + (ma_score * 4)
+            + (ma_score * 4)
         )
+
+        # ✅ 🔥 DIN NYA FIX (RÄTT PLATS)
+        long_trend = get_trend_score_from_history(prices)
+
+        if long_trend < 0:
+            total_score -= 10
 
         s["signal"] = sig
         s["score"] = max(0, min(100, int(total_score)))
@@ -377,7 +383,7 @@ def run_daily_ai():
 
         result.append(s)
 
-    # ✅ sortering + filter
+    # ✅ sortering
     result = sorted(result, key=lambda x: x["score"], reverse=True)
     result = [s for s in result if s["trigger_score"] >= 2]
 
