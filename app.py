@@ -110,7 +110,7 @@ def get_market_assets():
             if price and not math.isnan(price):
                 name = item.get("shortName") or symbol
 
-		assets.append({
+                assets.append({
     		    "t": symbol,
     		    "name": name,
     		    "price": price,
