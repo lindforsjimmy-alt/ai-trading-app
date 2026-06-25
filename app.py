@@ -50,6 +50,15 @@ MARKET_CACHE_TIME = 120
 news_cache = {}
 NEWS_CACHE_TIME = 300
 
+
+ai_cache = {
+    "last_run": 0,
+    "data": []
+}
+
+AI_REFRESH_TIME = 86400  # 24 timmar (sekunder)
+
+
 # ===== STOP LOSS =====
 def get_stop_loss(price, risk):
     if risk == "low":
@@ -99,11 +108,16 @@ def get_market_assets():
             symbol = item.get("symbol")
 
             if price and not math.isnan(price):
-                assets.append({
-                    "t": symbol,
-                    "name": symbol,
-                    "price": price
+                name = item.get("shortName") or symbol
+
+		assets.append({
+    		    "t": symbol,
+    		    "name": name,
+    		    "price": price,
+		    "currency": item.get("currency", "USD")
+
                 })
+
     except Exception as e:
         print("YAHOO ERROR:", e)
 
@@ -115,11 +129,13 @@ def get_market_assets():
         ).json()
 
         for c in data[:15]:
-            assets.append({
+    	    assets.append({
                 "t": c["symbol"].upper(),
-                "name": c["name"],
-                "price": c["current_price"]
+            	"name": c["name"],
+            	"price": c["current_price"],
+            	"currency": "USD"
             })
+
     except Exception as e:
         print("COINGECKO ERROR:", e)
 
@@ -142,12 +158,6 @@ def get_historical_data(symbol, period):
         return None
 
 # ===== AI =====
-def get_trend_score(price):
-    if price < 50: return 2
-    elif price < 200: return 1
-    elif price > 800: return -2
-    return 0
-
 def get_news_score(t):
 
     now = time.time()
@@ -179,12 +189,6 @@ def get_news_score(t):
     except:
         return 0
 
-
-def get_rsi_score(price):
-    if price < 80: return 1
-    elif price > 700: return -1
-    return 0
-
 def get_signal(price):
     if price < 300:
         return "KÖP"
@@ -196,9 +200,8 @@ def get_score(sig, price, t):
     base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
     val = base \
-        + (get_trend_score(price) * 5) \
         + (get_news_score(t) * 3) \
-        + (get_rsi_score(price) * 5)
+        
 
     return max(0, min(100, int(val)))
 
@@ -227,22 +230,232 @@ def get_reason(sig, price, t):
 
     return "\n".join(reasons)
 
+# ===== TREND FROM HISTORY =====
+def get_trend_score_from_history(prices):
+
+    if not prices or len(prices) < 10:
+        return 0
+
+    start = prices[0]
+    end = prices[-1]
+
+    change_pct = (end - start) / start * 100
+
+    if change_pct > 10:
+        return 2
+    elif change_pct > 3:
+        return 1
+    elif change_pct < -10:
+        return -2
+    elif change_pct < -3:
+        return -1
+
+    return 0
+
+# ===== RSI =====
+def calculate_rsi(prices, period=14):
+
+    if not prices or len(prices) < period:
+        return 50
+
+    gains = []
+    losses = []
+
+    for i in range(1, period):
+        change = prices[i] - prices[i - 1]
+
+        if change > 0:
+            gains.append(change)
+        else:
+            losses.append(abs(change))
+
+    avg_gain = sum(gains) / period if gains else 0
+    avg_loss = sum(losses) / period if losses else 0
+
+    if avg_loss == 0:
+        return 100
+
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi
+
+
+def get_rsi_score_from_history(prices):
+
+    rsi = calculate_rsi(prices)
+
+    if rsi < 30:
+        return 2
+    elif rsi < 45:
+        return 1
+    elif rsi > 70:
+        return -2
+    elif rsi > 60:
+        return -1
+
+    return 0
+
+# ===== MOVING AVERAGES =====
+def calculate_ma(prices, period):
+
+    if not prices or len(prices) < period:
+        return None
+
+    return sum(prices[-period:]) / period
+
+
+def get_ma_score(prices):
+
+    ma50 = calculate_ma(prices, 50)
+    ma200 = calculate_ma(prices, 200)
+
+    if not ma50 or not ma200:
+        return 0
+
+    if ma50 > ma200:
+        return 2
+    elif ma50 < ma200:
+        return -2
+
+    return 0
+
+# ===== AI DAILY SCAN =====
+def run_daily_ai():
+
+    now = time.time()
+
+    # ✅ om redan körd idag → returnera cache
+    if ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
+        return ai_cache["data"]
+
+    print("🔄 Running AI daily scan...")
+
+    assets = get_market_assets()
+    result = []
+
+    # ✅ LOOP (rätt indent)
+    for s in assets:
+        price = s.get("price", 0)
+        sig = get_signal(price)
+
+        # ✅ HÄMTA HISTORIK
+        hist = get_historical_data(s["t"], "1mo")
+
+        prices = []
+
+        if hist:
+            try:
+                prices = hist["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+                prices = [p for p in prices if p]
+            except:
+                prices = []
+
+        # ✅ NY TREND + RSI
+        trend_score = get_trend_score_from_history(prices)
+        rsi_score = get_rsi_score_from_history(prices)
+        news_score = get_news_score(s["t"])
+        ma_score = get_ma_score(prices)
+
+        # ✅ NY SCORE
+        base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
+
+        total_score = (
+            base
+            + (trend_score * 5)
+            + (rsi_score * 5)
+            + (news_score * 3)
+	    + (ma_score * 4)
+        )
+
+        s["signal"] = sig
+        s["score"] = max(0, min(100, int(total_score)))
+        s["reason"] = get_reason(sig, price, s["t"])
+
+        # ✅ trigger
+        s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
+
+        result.append(s)
+
+    # ✅ sortering + filter
+    result = sorted(result, key=lambda x: x["score"], reverse=True)
+    result = [s for s in result if s["trigger_score"] >= 2]
+
+    # ✅ cache
+    ai_cache["data"] = result
+    ai_cache["last_run"] = now
+
+    return result
+
+# ===== AI DASHBOARD ANALYSIS =====
+def dashboard_analysis(s):
+
+    return {
+        "Affär": "Starkt bolag inom sektor",
+        "Tillväxt": "Moderat tillväxt",
+        "Lönsamhet": "Stabil",
+        "Risk": "Medel",
+        "Värdering": "Neutral",
+        "Timing": s["signal"],
+        "Marknad": "Växande sektor",
+        "Investeringsidé": "Momentum + AI-score",
+        "Risknivå": "Medium",
+        "Beslut": s["signal"]
+    }
+
+# ===== TRIGGER SCORE =====
+def get_trigger_score(s):
+
+    score = 0
+    reasons = []
+
+    news = get_news_score(s["t"])
+
+    if news > 1:
+        score += 2
+        reasons.append("Nyheter")
+
+    if s["score"] > 70:
+        score += 2
+        reasons.append("Stark AI-score")
+
+    if s["signal"] == "KÖP":
+        score += 1
+        reasons.append("Momentum")
+
+    return score, reasons
+
+# ===== PORTFOLIO ANALYSIS =====
+def portfolio_analysis(decision, pl_pct):
+
+    return {
+        "Fundamenta": "Oförändrat",
+        "Hypotes": "Stämmer",
+        "Risk": "Medium",
+        "Kurs": f"{round(pl_pct, 2)}%",
+        "Värdering": "Neutral",
+        "Alternativ": "Finns bättre case",
+        "Position": "Normal",
+        "Sälj": "Vid target",
+        "Köp mer": "Vid dip",
+        "Tidsram": "Medel"
+    }
 
 # ===== PORTFOLIO AI =====
-def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, Strategi):
+def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy):
 
     news = get_news_score(t)
-    trend = get_trend_score(current_price)
+    trend = 0
 
-    # ===== Strategi =====
-    if Strategi == "short":
+    # ===== Strategy =====
+
+    if strategy == "short":
         take_profit = 8
         stop_loss = -4
 
-    elif Strategi == "long":
+    elif strategy == "long":
         take_profit = 20
         stop_loss = -12
-
 
     if pl_pct >= take_profit:
         return "SÄLJ", "Take profit target reached"
@@ -322,22 +535,23 @@ def dashboard():
     amount = request.form.get("amount") or "10000"
     print("AMOUNT:", amount)
 
-    ai_Strategi = request.form.get("ai_Strategi","short")
+    ai_strategy = request.form.get("ai_strategy", "short")
     ai_risk = request.form.get("ai_risk","medium")
     pf_risk = request.form.get("pf_risk","medium")
     period = request.form.get("period", "3m")
 
 
     # ===== AUTO Strategi → PERIOD =====
-    if ai_Strategi == "short":
+    if ai_strategy == "short":
         period = "1w"
-    elif ai_Strategi == "long":
+    elif ai_strategy == "long":
         period = "1y"
 
     print("PERIOD:", period)
     top_n = int(request.form.get("top_n", 5))
     
     assets = get_market_assets()
+
     print("ASSETS COUNT (first):", len(assets))
 
     # ✅ Retry (fix för Render sleep)
@@ -358,10 +572,16 @@ def dashboard():
 
     print("FINAL ASSETS USED:", len(assets))
 
+    ranked = run_daily_ai()
+    
+    stocks = [s for s in ranked if "." in s["t"] or len(s["t"]) <= 5]
+    crypto = [s for s in ranked if len(s["t"]) > 5]
+
+
 # ===== HANDLE BUY / SELL =====
     if request.method == "POST":
 
-        for s in assets:
+        for s in ranked:
             t = s["t"]
 
             # ✅ BUY
@@ -383,18 +603,6 @@ def dashboard():
     pf = portfolio(user)
     total_pl = 0
     total_start_value = 0
-
-    ranked = []
-    for s in assets:
-        price = s.get("price", 0)
-        sig = get_signal(price)
-
-        s["signal"] = sig
-        s["score"] = get_score(sig, price, s["t"])
-        s["reason"] = get_reason(sig, price, s["t"])
-        ranked.append(s)
-
-    ranked = sorted(ranked, key=lambda x: x["score"], reverse=True)
 
     buys = ranked[:top_n]
     
@@ -505,7 +713,7 @@ Kapital:
 <input name="amount" value="{amount}" maxlength="15" style="width:120px;">
 
 Strategi:
-<select name="ai_Strategi">
+<select name="ai_strategy">
 <option value="short">Kort</option>
 <option value="long">Lång</option>
 </select>
@@ -558,9 +766,10 @@ Score 0–100 (AI-betyg baserat på trend, nyheter och risk)
 """
 
     # ===== KÖP =====
+    html += "<p style='color:red; font-weight:bold;'>🚨 SÄLJ‑signaler skickas via mail</p>"
     html += "<div class='box'><h3>KÖP</h3>"
 
-    for s in buys:
+    for s in stocks[:top_n]:
         qty = max(1, int(per/s["price"])) if per else "-"
         ai_qty = qty
         sl = get_stop_loss(s["price"], ai_risk)
@@ -568,14 +777,15 @@ Score 0–100 (AI-betyg baserat på trend, nyheter och risk)
         html += f"""
 <form method="post" style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
 
-<b>{s.get('name', s['t'])} (Score {s['score']})</b>
+<b>{s.get('name', s['t'])} ({s['t']}) (Score {s['score']})</b>
 <button type="button" class="small-btn"
 style="margin-left:5px;"
 onclick="showPopup(`{s['reason']}`)">
 AI 💡
 </button>
-| Pris: {s['price']}<br>
+| Pris: {s['price']} {s.get('currency', '')}<br>
 AI: {s['signal']}<br>
+Trigger: {s['trigger_score']}<br>
 AI föreslår: {ai_qty} st | Stop-loss: {sl} | {get_link(s['t'])}<br><br>
 <input name="buyqty_{s['t']}" style="width:60px;">
 <button class="small-btn" name="buy_{s['t']}">
@@ -584,6 +794,21 @@ Köp
 </form>
 <hr>
 """
+
+    html += "</div>"
+
+    html += "<div class='box'><h3>KRYPTO</h3>"
+
+    for s in crypto[:top_n]:
+    	html += f"""
+    <form method="post" style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
+    <b>{s.get('name', s['t'])} ({s['t']}) (Score {s['score']})</b><br>
+    Pris: {s['price']} {s.get('currency','')}<br>
+    AI: {s['signal']}<br>
+    Trigger: {s['trigger_score']}<br>
+    </form>
+    <hr>
+    """
 
     html += "</div>"
 
@@ -605,7 +830,7 @@ style="margin-left:5px;"
 onclick="showPopup(`{s['reason']}`)">
 AI 💡
 </button>
-| Pris: {s['price']}<br>
+| Pris: {s['price']} {s.get('currency', '')}
 AI: {s['signal']}<br>
 AI föreslår: {ai_qty} st | Stop-loss: {sl} | {get_link(s['t'])}<br><br>
 
@@ -626,7 +851,7 @@ Köp
     html += f"""
 <form method="post">
 Strategi:
-<select name="pf_Strategi">
+<select name="pf_strategy">
 <option value="short">Kort</option>
 <option value="long">Lång</option>
 </select><br>
@@ -684,9 +909,13 @@ Time Range:
             start_price,
             s["t"],
             pf_risk,
-            ai_Strategi
-
+            ai_strategy
         )
+
+        if decision == "SÄLJ":
+            send_alert(user, f"SÄLJ {s['t']} nu! Anledning: {reason}")
+
+        analysis = portfolio_analysis(decision, pl_pct)
 
         total_pl += pl_value
         total_start_value += start_price * s["qty"]
@@ -710,6 +939,10 @@ Decision: <b style="color:{'red' if decision=='SÄLJ' else 'green' if decision==
 
 Reason: {reason}<br>
 
+Hypotes: {analysis["Hypotes"]}<br>
+Risk: {analysis["Risk"]}<br>
+Position: {analysis["Position"]}<br>
+
 Stop-loss: {sl}<br>
 {get_link(s['t'])}<br>
 
@@ -721,14 +954,14 @@ Sälj <input name="sellqty_{s['t']}">
 </form>
 <hr>
 """
-
         if decision == "SÄLJ":
             sell_col += block
         elif decision == "KÖP MER":
             buy_col += block
+        elif decision.lower() in ["avvakta", "hold"]:
+            hold_col += block
         else:
             hold_col += block
-
 
     total_pct = (total_pl / total_start_value * 100) if total_start_value else 0
 
@@ -756,31 +989,6 @@ open(PENDING_FILE, "a").close()
 
 import smtplib
 from email.mime.text import MIMEText
-
-
-def send_approval_email(new_user_email):
-
-    sender = "YOUR_MAIL@outlook.com"
-    password = "APP_PASSWORD"   # använd app password!
-
-    link = f"http://localhost:10000/approve?email={new_user_email}"
-
-    body = f"Godkänn ny användare:\n{new_user_email}\n\n{link}"
-
-    msg = MIMEText(body)
-    msg["Subject"] = "Godkänn användare"
-    msg["From"] = sender
-    msg["To"] = "lindfors.jimmy@outlook.com"
-
-    try:
-        server = smtplib.SMTP("smtp.office365.com", 587)
-        server.starttls()
-        server.login(sender, password)
-        server.send_message(msg)
-        server.quit()
-    except Exception as e:
-        print("Mail error:", e)
-
 
 @app.route("/approve")
 def approve():
@@ -975,8 +1183,8 @@ def change_password():
 # ===== APPROVAL EMAIL =====
 def send_approval_email(new_user_email):
 
-    sender = "YOUR_MAIL@outlook.com"
-    password = "APP_PASSWORD"
+    sender = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASSWORD")
 
     approve_link = f"http://localhost:10000/approve?email={new_user_email}"
     reject_link  = f"http://localhost:10000/reject?email={new_user_email}"
@@ -1007,6 +1215,26 @@ Ny användare vill registrera:
     except Exception as e:
         print("Approval mail error:", e)
 
+# ===== ALERT FUNCTION =====
+def send_alert(email, message):
+
+    sender = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASSWORD")
+
+    msg = MIMEText(message)
+    msg["Subject"] = "🚨 Trading Alert"
+    msg["From"] = sender
+    msg["To"] = email
+
+    try:
+        server = smtplib.SMTP("smtp.office365.com", 587)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        print("ALERT SENT:", message)
+    except Exception as e:
+        print("Alert error:", e)
 
 # ===== RESET EMAIL =====
 def send_reset_email(email):
