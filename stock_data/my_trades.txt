@@ -4,3 +4,4 @@ lindfors.jimmy@outlook.com|LEO|213|9.39
 lindfors.jimmy@outlook.com|USDT|2002|0.998515
 lindfors.jimmy@outlook.com|SOL|29|67.21
 lindfors.jimmy@outlook.com|SOL|29|68.12
+lindfors.jimmy@outlook.com|SOL|29|69.75

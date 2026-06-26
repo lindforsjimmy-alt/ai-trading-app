@@ -1025,7 +1025,7 @@ Time Range:
         )
 
         if decision == "SÄLJ":
-            send_alert(user, f"SÄLJ {s['t']} nu! Anledning: {reason}")
+            print(f"SÄLJ ALERT: {s['t']}")
 
         analysis = portfolio_analysis(decision, pl_pct)
 
@@ -1377,14 +1377,22 @@ def send_alert(email, message):
     msg["To"] = email
 
     try:
+        msg = MIMEText(message)
+        msg["Subject"] = "🚨 Trading Alert"
+        msg["From"] = sender
+        msg["To"] = email
+
         server = smtplib.SMTP("smtp.office365.com", 587)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
+
         print("ALERT SENT:", message)
+
     except Exception as e:
         print("Alert error:", e)
+        return
 
 # ===== RESET EMAIL =====
 def send_reset_email(email):
