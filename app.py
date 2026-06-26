@@ -3,6 +3,8 @@ from flask import Flask, redirect, session, request
 import os, requests, time, feedparser, math, hashlib
 from datetime import timedelta
 
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
+
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(hours=12)
 app.secret_key = "super_secret_trading_key_123"
@@ -41,6 +43,17 @@ def user_exists(email):
 
 
 # ===== CACHE =====
+def safe_fetch(fn, retries=3):
+    for _ in range(retries):
+        try:
+            data = fn()
+            if data:
+                return data
+        except:
+            pass
+        time.sleep(2)
+    return []
+
 price_cache = {}
 CACHE_TIME = 60
 
@@ -321,8 +334,7 @@ def get_ma_score(prices):
     return 0
 
 # ===== AI DAILY SCAN =====
-# ===== AI DAILY SCAN =====
-def run_daily_ai():
+def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
     now = time.time()
 
@@ -332,7 +344,7 @@ def run_daily_ai():
 
     print("🔄 Running AI daily scan...")
 
-    assets = get_market_assets()
+    assets = safe_fetch(get_market_assets)
     result = []
 
     for s in assets:
@@ -351,28 +363,92 @@ def run_daily_ai():
             except:
                 prices = []
 
-        # ✅ indikatorer
+        # ✅ indikatorer (MÅSTE KOMMA FÖRST)
         trend_score = get_trend_score_from_history(prices)
         rsi_score = get_rsi_score_from_history(prices)
         news_score = get_news_score(s["t"])
         ma_score = get_ma_score(prices)
+
+        # ✅ Justera vikter baserat på strategi
+   
+        if strategy == "short":
+            trend_weight = 5
+            rsi_weight = 6
+            ma_weight = 4
+            news_weight = 3
+
+        elif strategy == "long":
+            trend_weight = 6
+            rsi_weight = 2
+            ma_weight = 6
+            news_weight = 2
+
+        else:
+            trend_weight = 5
+            rsi_weight = 5
+            ma_weight = 4
+            news_weight = 3
 
         # ✅ base score
         base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
         total_score = (
             base
-            + (trend_score * 5)
-            + (rsi_score * 5)
-            + (news_score * 3)
-            + (ma_score * 4)
+            + (trend_score * trend_weight)
+            + (rsi_score * rsi_weight)
+            + (news_score * news_weight)
+            + (ma_score * ma_weight)
+
         )
 
-        # ✅ 🔥 DIN NYA FIX (RÄTT PLATS)
+        # ✅ kapital-filter
+
+        if capital < 15000 and price > 200:
+            total_score -= 5
+
+        if capital > 30000 and price < 10:
+            total_score -= 3
+
+        # ✅ FILTER beroende på strategi
+
+        if strategy == "short":
+
+            if trend_score < 0:
+                total_score -= 4
+
+            if rsi_score < 0:
+                total_score -= 5
+
+        elif strategy == "long":
+
+            if trend_score < 0:
+                continue  # strikt
+
+            if ma_score < 0:
+                continue  # viktigt för långsiktigt
+
+
+        # ===== FILTER 1: lång trend =====
         long_trend = get_trend_score_from_history(prices)
 
         if long_trend < 0:
+            total_score -= 5
+
+
+        # ===== FILTER 2: billiga tillgångar =====
+        
+        # crypto filter
+        if s.get("currency") == "USD" and price < 0.1:
             total_score -= 10
+
+        # aktie filter (enkelt)
+        if price < 5:
+            total_score -= 3
+
+
+        # ===== FILTER 3: momentum krav =====
+        if trend_score <= 0 and ma_score <= 0:
+            total_score -= 5
 
         s["signal"] = sig
         s["score"] = max(0, min(100, int(total_score)))
@@ -451,7 +527,7 @@ def portfolio_analysis(decision, pl_pct):
 def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy):
 
     news = get_news_score(t)
-    trend = 0
+    trend = get_trend_score_from_history([])
 
     # ===== Strategy =====
 
@@ -464,7 +540,9 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
         stop_loss = -12
 
     if pl_pct >= take_profit:
-        return "SÄLJ", "Take profit target reached"
+        if news > 0 and trend > 0:
+            return "Avvakta", "Strong trend continues"
+        return "SÄLJ", "Take profit reached"
 
     if pl_pct <= stop_loss:
         return "SÄLJ", "Stop-loss triggered"
@@ -485,18 +563,48 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
 
 
 # ===== PORTFOLIO =====
-
 def portfolio(user):
-    data={}
+    data = {}
+
     with open(DATA_FILE) as f:
         for l in f:
-            parts=l.strip().split("|")
-            if len(parts)<4: continue
-            u,t,q,_=parts
-            if u!=user: continue
-            data[t]=data.get(t,0)+int(float(q))
-    return [{"t":t,"qty":q} for t,q in data.items() if q>0]
+            parts = l.strip().split("|")
+            if len(parts) < 4:
+                continue
 
+            u, t, q, p = parts
+
+            if u != user:
+                continue
+
+            q = int(float(q))
+            p = float(p)
+
+            if t not in data:
+                data[t] = {
+                    "qty": 0,
+                    "total_cost": 0
+                }
+
+            data[t]["qty"] += q
+            data[t]["total_cost"] += q * p
+
+    result = []
+
+    for t, d in data.items():
+
+        if d["qty"] <= 0:
+            continue
+
+        avg_price = round(d["total_cost"] / d["qty"], 2) if d["qty"] else 0
+
+        result.append({
+            "t": t,
+            "qty": d["qty"],
+            "avg_price": avg_price
+        })
+
+    return result
 
 # ===== TRADE =====
 def buy(user,t,qty,price):
@@ -538,7 +646,7 @@ def dashboard():
     if not user:
         return redirect("/login")
 
-    amount = request.form.get("amount") or "10000"
+    amount = int(request.form.get("amount") or 10000)
     print("AMOUNT:", amount)
 
     ai_strategy = request.form.get("ai_strategy", "short")
@@ -556,18 +664,10 @@ def dashboard():
     print("PERIOD:", period)
     top_n = int(request.form.get("top_n", 5))
     
-    assets = get_market_assets()
+    assets = safe_fetch(get_market_assets)
 
     print("ASSETS COUNT (first):", len(assets))
 
-    # ✅ Retry (fix för Render sleep)
-    if not assets:
-        print("Retrying fetch...")
-        time.sleep(2)
-        assets = get_market_assets()
-        print("ASSETS COUNT (retry):", len(assets))
-
-    # ✅ Fallback (sista säkerhet)
     if not assets:
         print("⚠️ Using fallback data")
         assets = [
@@ -576,10 +676,9 @@ def dashboard():
             {"t": "NVDA", "name": "Nvidia", "price": 1200}
         ]
 
-    print("FINAL ASSETS USED:", len(assets))
-
-    ranked = run_daily_ai()
+    print("FINAL ASSETS USED:", len(assets)) 
     
+    ranked = run_daily_ai(ai_strategy, ai_risk, amount)
     stocks = [s for s in ranked if "." in s["t"] or len(s["t"]) <= 5]
     crypto = [s for s in ranked if len(s["t"]) > 5]
 
@@ -609,6 +708,7 @@ def dashboard():
     pf = portfolio(user)
     total_pl = 0
     total_start_value = 0
+    total_value = 0
 
     buys = ranked[:top_n]
     
@@ -620,6 +720,8 @@ def dashboard():
     html = f"""
 <html>
 <head>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 .popup {{
@@ -720,15 +822,15 @@ Kapital:
 
 Strategi:
 <select name="ai_strategy">
-<option value="short">Kort</option>
-<option value="long">Lång</option>
+<option value="short" {"selected" if ai_strategy=="short" else ""}>Kort</option>
+<option value="long" {"selected" if ai_strategy=="long" else ""}>Lång</option>
 </select>
 
 Risk:
 <select name="ai_risk">
-<option value="low">Låg</option>
-<option value="medium">Medel</option>
-<option value="high">Hög</option>
+<option value="low" {"selected" if ai_risk=="low" else ""}>Låg</option>
+<option value="medium" {"selected" if ai_risk=="medium" else ""}>Medel</option>
+<option value="high" {"selected" if ai_risk=="high" else ""}>Hög</option>
 </select>
 
 Antal AI-rekommendationer:
@@ -806,7 +908,7 @@ Köp
     html += "<div class='box'><h3>KRYPTO</h3>"
 
     for s in crypto[:top_n]:
-    	html += f"""
+        html += f"""
     <form method="post" style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
     <b>{s.get('name', s['t'])} ({s['t']}) (Score {s['score']})</b><br>
     Pris: {s['price']} {s.get('currency','')}<br>
@@ -893,6 +995,10 @@ Time Range:
 
     for s in pf:
         current_price = next((x["price"] for x in ranked if x["t"] == s["t"]), 0)
+        name = next((x.get("name", x["t"]) for x in ranked if x["t"] == s["t"]), s["t"])
+
+        position_value = current_price * s["qty"]
+        total_value += position_value
 
         hist = get_historical_data(s["t"], period)
 
@@ -932,7 +1038,7 @@ Time Range:
         block = f"""
 
 <form method="post" style="border:1px solid #ccc; padding:10px; margin-bottom:10px;">
-<b>{s['t']}</b> ({s['qty']})<br>
+<b>{name} ({s['t']})</b> ({s['qty']})<br>
 Pris: {current_price}<br>
 
 P/L: 
@@ -970,6 +1076,42 @@ Sälj <input name="sellqty_{s['t']}">
             hold_col += block
 
     total_pct = (total_pl / total_start_value * 100) if total_start_value else 0
+    labels = ["Tidigare", "Igår", "Nu"]
+
+    # ✅ graf-data
+    values = [round(total_value * x, 2) for x in [0.8, 0.9, 1.0]]
+    labels = ["Tidigare", "Igår", "Nu"]
+
+    # ✅ GRAF
+    html += f"""
+    <canvas id="portfolioChart" style="max-width:100%; margin-top:20px;"></canvas>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+    const ctx = document.getElementById('portfolioChart').getContext('2d');
+
+    new Chart(ctx, {{
+        type: 'line',
+        data: {{
+            labels: {labels},
+            datasets: [{{
+                label: 'Portföljvärde',
+                data: {values},
+                borderColor: 'green',
+                tension: 0.2
+            }}]
+        }}
+    }});
+    </script>
+    """
+
+# ✅ DIN P/L BLOCK (ska ligga kvar under)
+
+    html += f"""
+    <p>
+    <b>Totalt värde:</b> {round(total_value, 2)} kr
+    </p>
+    """
 
     html += f"""
     <p>
@@ -979,13 +1121,6 @@ Sälj <input name="sellqty_{s['t']}">
     </span>
     </p>
     """
-
-    html += sell_col + "</div>" + buy_col + "</div>" + hold_col + "</div></div>"
-
-    html += """
-</body>
-</html>
-"""
 
     return html
 
@@ -1187,12 +1322,17 @@ def change_password():
     """
 
 # ===== APPROVAL EMAIL =====
+
 def send_approval_email(new_user_email):
 
     sender = os.environ.get("EMAIL_USER")
     password = os.environ.get("EMAIL_PASSWORD")
 
-    approve_link = f"http://localhost:10000/approve?email={new_user_email}"
+    if not sender or not password:
+        print("⚠️ Email not configured")
+        return
+
+    approve_link = f"{BASE_URL}/approve?email={new_user_email}"
     reject_link  = f"http://localhost:10000/reject?email={new_user_email}"
 
     body = f"""
@@ -1226,6 +1366,10 @@ def send_alert(email, message):
 
     sender = os.environ.get("EMAIL_USER")
     password = os.environ.get("EMAIL_PASSWORD")
+
+    if not sender or not password:
+            print("⚠️ Email not configured")
+            return
 
     msg = MIMEText(message)
     msg["Subject"] = "🚨 Trading Alert"
@@ -1291,5 +1435,5 @@ def forgot():
     """
 
 if __name__=="__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+        port = int(os.environ.get("PORT", 10000))
+        app.run(host="0.0.0.0", port=port)

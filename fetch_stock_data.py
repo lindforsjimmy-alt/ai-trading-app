@@ -22,7 +22,7 @@ crypto_map = {
 def get_crypto_list():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd"
-        data = requests.get(url).json()
+        data = requests.get(url, timeout=10).json()
 
         coins = []
         for c in data[:20]:
@@ -30,14 +30,18 @@ def get_crypto_list():
             if symbol in crypto_map:
                 coins.append(symbol)
 
-        return list(set(coins))
+        # fallback om API returnerar tomt
+        return list(set(coins)) if coins else list(crypto_map.keys())
+
     except:
+        print("⚠️ API fel – använder fallback")
         return list(crypto_map.keys())
 
 crypto = get_crypto_list()
 
 assets = []
 
+# ✅ HÄMTA PRIS + GROWTH
 def get_data(t):
     try:
         s = yf.Ticker(t)
@@ -49,15 +53,22 @@ def get_data(t):
         old = hist["Close"].iloc[0]
         new = hist["Close"].iloc[-1]
 
+        if old == 0:
+            return None
+
         growth = (new - old) / old
+
         return (t, round(new, 2), round(growth, 3))
+
     except:
         return None
+
 
 # ✅ AKTIER
 for t in tickers:
     d = get_data(t)
     if d:
+        # (ticker, namn, pris, growth, plattform)
         assets.append((t, t, d[1], d[2], "AVANZA"))
 
 # ✅ KRYPTO
@@ -66,22 +77,22 @@ for t in crypto:
     if d:
         assets.append((t, crypto_map.get(t, t), d[1], d[2], "SAFELLO"))
 
-# ✅ SORTERA
+# ✅ SORTERA (HIGH → LOW)
 assets = sorted(assets, key=lambda x: x[3], reverse=True)
 
-# ✅ SPLIT
+# ✅ SPLIT TOP 15
 stocks = [x for x in assets if x[4] == "AVANZA"][:15]
 cryptos = [x for x in assets if x[4] == "SAFELLO"][:15]
 
-# ✅ SPARA
+# ✅ SPARA (VIKTIG STRUKTUR)
 with open("stock_data/stocks.txt", "w") as f:
 
     f.write("=== STOCKS ===\n")
-    for t,name,p,g,plat in stocks:
+    for t, name, p, g, plat in stocks:
         f.write(f"{t}|{name}|{p}|0|{g}|{plat}\n")
 
     f.write("\n=== CRYPTO ===\n")
-    for t,name,p,g,plat in cryptos:
+    for t, name, p, g, plat in cryptos:
         f.write(f"{t}|{name}|{p}|0|{g}|{plat}\n")
 
-print("✅ Avanza + Safello redo")
+print("✅ Avanza + Safello data uppdaterad")
