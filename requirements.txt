@@ -5,4 +5,4 @@ requests
 feedparser
 openai==1.0.0
 gunicorn
-
+finnhub-python
