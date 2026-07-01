@@ -6,3 +6,4 @@ feedparser
 openai==1.0.0
 gunicorn
 finnhub-python
+python-dotenv
