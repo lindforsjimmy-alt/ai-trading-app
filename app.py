@@ -1510,6 +1510,7 @@ Score: {s.get('score', '-')}<br><br>
     </div>
     <hr>
     """
+    
 @app.route("/dashboard", methods=["GET", "POST"])
 def dashboard():
 
@@ -1517,6 +1518,7 @@ def dashboard():
     if not user:
         return redirect("/login")
 
+    # ✅ HANDLE BUY/SELL
     if request.method == "POST":
         ranked_tmp = ai_results_cache.get("data") or run_daily_ai("short", "medium", 10000)
 
@@ -1533,30 +1535,37 @@ def dashboard():
                 if qty and qty.isdigit():
                     sell(user, t, int(qty))
 
+    # ✅ SETTINGS
     amount = int(request.form.get("amount") or 10000)
     ai_strategy = request.form.get("ai_strategy", "short")
     ai_risk = request.form.get("ai_risk", "medium")
     top_n = int(request.form.get("top_n") or 5)
     priority = request.form.get("priority", "mix")
     min_score = int(request.form.get("min_score") or 70)
-
+    
     ranked = ai_results_cache.get("data")
 
     if not ranked:
-        return "⏳ Laddar AI... vänta 10–30 sek och refresha sidan"
+        print("⚠️ Cache tom – kör AI direkt")
+        ranked = run_daily_ai("short", "medium", amount)
 
-    # ✅ Top 5 global trades (bästa i världen)
+    if not ranked:
+        print("⚠️ Cache tom – kör AI direkt")
+        ranked = run_daily_ai("short", "medium", amount)
+
+    # ✅ GLOBAL TOP
     top_global = [
         s for s in ranked
         if s.get("score", 0) >= 75 and s.get("trigger_score", 0) >= 2
     ][:5]
-    
+
+    # ✅ PORTFOLIO
     pf = portfolio(user)
 
     sell_list = []
     buy_more_list = []
     wait_list = []
-    
+
     for s in pf:
         match = next((x for x in ranked if x["t"] == s["t"]), None)
 
@@ -1590,58 +1599,58 @@ def dashboard():
             buy_more_list.append(s)
         else:
             wait_list.append(s)
-    
-        # ✅ separera aktier och crypto
-        stock_candidates = [
-            x for x in ranked
-            if x.get("type") != "crypto" and x.get("score", 0) >= min_score
-        ]
 
-        crypto_candidates = [
-            x for x in ranked
-            if x.get("type") == "crypto" and x.get("score", 0) >= min_score
-        ]
+    # ✅ ✅ VIKTIGT: UTANFÖR LOOPEN
 
-        # ✅ crypto kräver trigger
-        crypto_candidates = [
-            x for x in crypto_candidates
-            if x.get("trigger_score", 0) >= 2
-        ]
+    stock_candidates = [
+        x for x in ranked
+        if x.get("type") != "crypto" and x.get("score", 0) >= min_score
+    ]
 
-        # ✅ PRIORITY LOGIK
-        if priority == "stocks":
-            stocks = stock_candidates[:top_n]
+    crypto_candidates = [
+        x for x in ranked
+        if x.get("type") == "crypto" and x.get("score", 0) >= min_score
+    ]
 
-            if len(stocks) < top_n:
-                stocks += [
-                    x for x in ranked if x.get("type") != "crypto"
-                ][:top_n - len(stocks)]
+    crypto_candidates = [
+        x for x in crypto_candidates
+        if x.get("trigger_score", 0) >= 2
+    ]
 
-            crypto = crypto_candidates[:top_n]
+    # ✅ PRIORITY
+    if priority == "stocks":
+        stocks = stock_candidates[:top_n]
 
-        elif priority == "crypto":
-            crypto = crypto_candidates[:top_n]
+        if len(stocks) < top_n:
+            stocks += [
+                x for x in ranked if x.get("type") != "crypto"
+            ][:top_n - len(stocks)]
 
-            if len(crypto) < top_n:
-                crypto += [
-                    x for x in ranked if x.get("type") == "crypto"
-                ][:top_n - len(crypto)]
+        crypto = crypto_candidates[:top_n]
 
-            stocks = stock_candidates[:top_n]
+    elif priority == "crypto":
+        crypto = crypto_candidates[:top_n]
 
-        else:  # mix
-            stocks = stock_candidates[:top_n]
+        if len(crypto) < top_n:
+            crypto += [
+                x for x in ranked if x.get("type") == "crypto"
+            ][:top_n - len(crypto)]
 
-            if len(stocks) < top_n:
-                stocks = [
-                    x for x in ranked if x.get("type") != "crypto"
-                ][:top_n]
+        stocks = stock_candidates[:top_n]
 
-            crypto = crypto_candidates[:top_n]
+    else:  # mix
+        stocks = stock_candidates[:top_n]
 
-        wait = ranked[top_n:top_n*2]
+        if len(stocks) < top_n:
+            stocks = [
+                x for x in ranked if x.get("type") != "crypto"
+            ][:top_n]
 
-    # ✅ usage stats
+        crypto = crypto_candidates[:top_n]
+
+    wait = ranked[top_n:top_n * 2]
+
+    # ✅ USAGE
     usage = finnhub_calls.get("count", 0)
     limit = FINNHUB_LIMIT
     percent = int((usage / limit) * 100) if limit else 0

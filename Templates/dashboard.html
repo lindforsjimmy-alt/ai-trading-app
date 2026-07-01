@@ -73,9 +73,8 @@
 
         window.onload = function () {
             if (!window.location.hash) {
-                show
-            } else {
                 showTab('dashboard');
+            } else {
                 showTab(window.location.hash.substring(1));
             }
         }
