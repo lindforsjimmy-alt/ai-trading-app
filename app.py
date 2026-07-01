@@ -507,7 +507,10 @@ def is_tradeable(s):
         price = price.get("price", 0)
 
     # ✅ STOCK LOGIK
-    if len(symbol) <= 5:
+    asset_type = s.get("type")
+
+    # ✅ STOCK LOGIK
+    if asset_type == "stock":
         if price < 5:
             return False
 
@@ -515,7 +518,7 @@ def is_tradeable(s):
             return False
 
     # ✅ CRYPTO LOGIK
-    else:
+    elif asset_type == "crypto":
         if price < 0.1:
             return False
 
