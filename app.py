@@ -2,8 +2,11 @@
     # ===== IMPORTS =====
 from flask import Flask, redirect, session, request, render_template
 import os, requests, time, feedparser, math, hashlib
-from dotenv import load_dotenv
-load_dotenv("api.env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv("api.env")
+except:
+    print("⚠️ dotenv not available (Render OK)")
 from datetime import timedelta
 import finnhub
 import pandas as pd
