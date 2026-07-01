@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <meta http-equiv="refresh" content="90">
+    <!-- <meta http-equiv="refresh" content="90"> -->
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <style>
@@ -72,7 +72,12 @@
         }
 
         window.onload = function () {
-            showTab('dashboard');
+            if (!window.location.hash) {
+                show
+            } else {
+                showTab('dashboard');
+                showTab(window.location.hash.substring(1));
+            }
         }
 
     </script>
