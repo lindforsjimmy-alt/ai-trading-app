@@ -59,7 +59,6 @@ def get_indicators(t):
         "macd_signal": signal_val
     }
 
-
 # ===== AI SIGNAL =====
 def signal(t):
 

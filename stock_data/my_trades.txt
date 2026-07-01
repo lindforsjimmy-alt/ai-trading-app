@@ -78,3 +78,5 @@ lindfors.jimmy@outlook.com|TSLA|6|100
 lindfors.jimmy@outlook.com|AAPL|6|100
 lindfors.jimmy@outlook.com|NVDA|6|100
 lindfors.jimmy@outlook.com|AMZN|5|100
+lindfors.jimmy@outlook.com|JUPUSD|10|1.0
+lindfors.jimmy@outlook.com|COMP|10|15.89

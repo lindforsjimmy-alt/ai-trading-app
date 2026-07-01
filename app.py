@@ -1,12 +1,17 @@
 
-# ===== IMPORTS =====
-from flask import Flask, redirect, session, request
+    # ===== IMPORTS =====
+from flask import Flask, redirect, session, request, render_template
 import os, requests, time, feedparser, math, hashlib
+from dotenv import load_dotenv
+load_dotenv("api.env")
 from datetime import timedelta
 import finnhub
 import pandas as pd
+import threading
+from main import signal
+from sp500_list import SP500_SYMBOLS
 
-# ===== CONFIG / APP SETUP =====
+    # ===== CONFIG / APP SETUP =====
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
 
 finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
@@ -40,8 +45,8 @@ def check_user(email, password):
         for l in f:
             e, p = l.strip().split("|")
             if e == email and p == hash_password(password):
-                return True
-    return False
+                    return True
+        return False
 
 def user_exists(email):
     with open(USERS_FILE) as f:
@@ -51,6 +56,19 @@ def user_exists(email):
     return False
 
 # ===== CACHE =====
+def get_finnhub_usage():
+    return finnhub_calls.get("count", 0), FINNHUB_LIMIT
+
+finnhub_calls = {
+    "count": 0,
+    "last_reset": time.time()
+}
+
+FINNHUB_LIMIT = 60  # per minute
+
+market_data_cache = {}
+ai_results_cache = {}
+
 def safe_fetch(fn, retries=3):
     for _ in range(retries):
         try:
@@ -70,25 +88,52 @@ market_cache = {}
 MARKET_CACHE_TIME = 120
 
 news_cache = {}
-NEWS_CACHE_TIME = 300
-
+NEWS_CACHE_TIME = 3600
 
 ai_cache = {
 "last_run": 0,
 "data": []
 }
 
+alert_cache = {}
+
 AI_REFRESH_TIME = 86400  # 24 timmar (sekunder)
 
 # ===== MARKET =====
-
 def get_price_finnhub(symbol):
+    global finnhub_calls
+
+    now = time.time()
+
+    # reset varje minut
+    if now - finnhub_calls["last_reset"] > 60:
+        finnhub_calls["count"] = 0
+        finnhub_calls["last_reset"] = now
+
+    finnhub_calls["count"] += 1
+
+    print(f"📊 Finnhub calls: {finnhub_calls['count']}/{FINNHUB_LIMIT}")
+
+    if finnhub_calls["count"] >= FINNHUB_LIMIT - 2:
+        print("⚠️ Rate limit – skipping")
+        return None
+
     try:
         data = finnhub_client.quote(symbol)
+
         price = data.get("c")
-        return price if price and price > 0 else None
+        volume = data.get("v")
+
+        if price and price > 0:
+            return {
+                "price": price,
+                "volume": volume or 0
+            }
+
     except:
         return None
+
+    return None
 
 
 def get_price_yahoo(symbol):
@@ -121,36 +166,38 @@ def get_price_yahoo(symbol):
 # ✅ CENTRAL PRIS-FUNKTION (VIKTIG!)
 def get_price(symbol):
 
-    # 1️⃣ Finnhub (PRIMARY)
-    price = get_price_finnhub(symbol)
-    if price:
-        return price
+    data = get_price_finnhub(symbol)
 
-    # 2️⃣ Yahoo (FALLBACK)
+    if data:
+        return data
+
     price = get_price_yahoo(symbol)
+
     if price:
-        return price
+        return {
+            "price": price,
+            "volume": 0
+        }
 
     return None
 
-
+#INDENT (0)
 def get_sp500_symbols():
-    import pandas as pd
+    print("✅ Loaded S&P500 (local)")
+    return SP500_SYMBOLS
 
-    try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
-        df = tables[0]
+def get_global_stock_universe():
+    base = get_sp500_symbols()
 
-        symbols = df["Symbol"].tolist()
-        symbols = [s.replace(".", "-") for s in symbols]
+    extra = [
+        "SHOP","PLTR","RIVN","COIN","SQ","PYPL",
+        "BABA","NIO","XPEV","LI","TSM",
+        "SAP","ASML","NOVO-B.CO","VOLV-B.CO"
+    ]
 
-        print("✅ Loaded S&P500:", len(symbols))
-        return symbols
+    symbols = list(set(base + extra))
 
-    except Exception as e:
-        print("❌ SP500 FAIL:", e)
-        return ["AAPL", "MSFT", "NVDA", "AMZN", "TSLA"]
-
+    return symbols[:2000]
 
 # ✅ AKTIER (Finnhub + Yahoo fallback)
 def get_stock_assets(symbols):
@@ -158,40 +205,54 @@ def get_stock_assets(symbols):
     assets = []
 
     for sym in symbols:
+
         price = get_price(sym)
 
-        if price:
-            assets.append({
-                "t": sym,
-                "name": sym,
-                "price": price,
-                "currency": "USD"
-            })
+        if not price:
+            continue
+
+        # ✅ FIX
+        if isinstance(price, dict):
+            p = price.get("price", 0)
+        else:
+            p = price
+
+        if not p or p <= 0:
+            continue
+
+        assets.append({
+            "t": sym,
+            "name": sym,
+            "price": p,
+            "currency": "USD",
+            "type": "stock"
+        })
 
     return assets
 
-
 # ✅ CRYPTO (CoinGecko)
 def get_crypto_assets():
-
     assets = []
 
-    try:
-        data = requests.get(
-            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd",
-            timeout=5
-        ).json()
+    for page in range(1, 5):
+        try:
+            data = requests.get(
+                f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}"
+            ).json()
 
-        for c in data[:15]:
-            assets.append({
-                "t": c["symbol"].upper(),
-                "name": c["name"],
-                "price": c["current_price"],
-                "currency": "USD"
-            })
-
-    except Exception as e:
-        print("COINGECKO ERROR:", e)
+            for c in data:
+                
+                assets.append({
+                    "t": c["symbol"].upper(),
+                    "name": c["name"],
+                    "price": c["current_price"],
+                    "volume": c.get("total_volume", 0),
+                    "currency": "USD",
+                    "type": "crypto"
+                })
+                
+        except:
+            continue
 
     return assets
 
@@ -214,7 +275,7 @@ def get_market_assets():
     symbols += [s["t"] for s in ai_cache.get("data", [])[:50]]
 
     symbols = list(set(symbols))
-    symbols = symbols[:200]  # ✅ viktigt (prestanda + API limit)
+    symbols = symbols[:80]  
 
     # ✅ HÄMTA DATA
     stock_assets = get_stock_assets(symbols)
@@ -244,6 +305,55 @@ def get_market_assets():
 
     return assets
 
+def scan_market_background():
+    symbols = get_global_stock_universe()
+
+    BATCH = 60
+    all_assets = []
+    skipped_count = 0
+
+    for i in range(0, len(symbols), BATCH):
+
+        batch = symbols[i:i+BATCH]
+
+        for sym in batch:
+
+            data = get_price(sym)
+
+            if not data or not isinstance(data, dict):
+                print("SKIPPED (no data):", sym, data)
+                skipped_count += 1
+                continue
+
+            price = data.get("price")
+            volume = data.get("volume", 0)
+
+            if not isinstance(price, (int, float)) or price <= 0:
+                print("SKIPPED (bad price):", sym, price)
+                skipped_count += 1
+                continue
+
+            
+            asset = {
+                "t": sym,
+                "price": price,
+                "volume": volume,
+                "currency": "USD",
+                "type": "stock"
+            }
+
+
+            all_assets.append(asset)
+
+        print(f"✅ Batch {i} klar | Finnhub calls: {finnhub_calls['count']} | Skipped: {skipped_count}")
+
+        time.sleep(60)
+
+    crypto_assets = get_crypto_assets()
+    all_assets += crypto_assets
+
+    market_data_cache["data"] = all_assets
+    
 # ===== HISTORICAL DATA =====
 def get_historical_data(symbol, period):
 
@@ -386,6 +496,34 @@ def get_signal(price):
     
     return "AVVAKTA"
 
+def is_tradeable(s):
+
+    price = s.get("price", 0)
+    volume = s.get("volume", 0)
+    symbol = s.get("t")
+
+    # ✅ FIX: hantera om price råkar vara dict
+    if isinstance(price, dict):
+        price = price.get("price", 0)
+
+    # ✅ STOCK LOGIK
+    if len(symbol) <= 5:
+        if price < 5:
+            return False
+
+        if volume < 1_000_000:
+            return False
+
+    # ✅ CRYPTO LOGIK
+    else:
+        if price < 0.1:
+            return False
+
+        if volume < 5_000_000:
+            return False
+
+    return True
+
 def get_score(sig, price, t):
     base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
@@ -395,30 +533,83 @@ def get_score(sig, price, t):
 
     return max(0, min(100, int(val)))
 
-def get_reason(sig, price, t):
+def get_reason(sig, price, t, s=None):
 
     reasons = []
 
+    # ✅ signal
     if sig == "KÖP":
-        reasons.append("Trend visar köpläge")
+        reasons.append("📈 Momentum indikerar köpläge")
     elif sig == "SÄLJ":
-        reasons.append("Hög värdering")
+        reasons.append("📉 Övervärderad / svag trend")
     else:
-        reasons.append("Neutral trend")
+        reasons.append("➖ Neutral trend")
 
-    if price < 100:
-        reasons.append("Låg prisnivå (potential)")
-    elif price > 500:
-        reasons.append("Hög prisnivå")
+    # ✅ prisnivå
+    if price < 20:
+        reasons.append("💸 Låg prisnivå (hög potential)")
+    elif price > 200:
+        reasons.append("💰 Hög prisnivå")
 
+    # ✅ news
     news_score = get_news_score(t)
-
     if news_score > 0:
-        reasons.append("Positiva nyheter")
+        reasons.append("📰 Positivt nyhetsflöde")
     elif news_score < 0:
-        reasons.append("Negativa nyheter")
+        reasons.append("📰 Negativt nyhetsflöde")
+
+    # ✅ volym
+    if s:
+        vol = s.get("volume", 0)
+
+        if vol > 10_000_000:
+            reasons.append("💧 Hög likviditet")
+        elif vol < 1_000_000:
+            reasons.append("⚠️ Låg likviditet")
+
+    # ✅ crypto vs aktie
+    if len(t) > 5:
+        reasons.append("⚠️ Crypto – hög volatilitet")
 
     return "\n".join(reasons)
+
+def get_summary(s):
+
+    sig = s.get("signal", "")
+    score = s.get("score", 0)
+    symbol = s.get("t", "")
+    volume = s.get("volume", 0)
+
+    # ✅ bas
+    if sig == "KÖP":
+        txt = "📈 Stark momentum‑driven möjlighet"
+    elif sig == "SÄLJ":
+        txt = "📉 Svag trend eller övervärderad"
+    else:
+        txt = "➖ Neutral marknadssignal"
+
+    # ✅ förstärk med score
+    if score > 85:
+        txt += " med hög AI‑confidence"
+    elif score > 70:
+        txt += " med god potential"
+
+    # ✅ news
+    news = get_news_score(symbol)
+    if news > 0:
+        txt += " och positivt nyhetsflöde"
+    elif news < 0:
+        txt += " med negativt nyhetsflöde"
+
+    # ✅ volym
+    if volume > 10_000_000:
+        txt += " samt hög likviditet"
+
+    # ✅ crypto flag
+    if s.get("type") == "crypto":
+        txt += " (crypto – hög volatilitet)"
+
+    return txt
 
 # ===== TREND FROM HISTORY =====
 def get_trend_score_from_history(prices):
@@ -443,6 +634,14 @@ def get_trend_score_from_history(prices):
     return 0
 
 # ===== AI ENGINE =====
+def get_usd_sek():
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
+        data = r.json()
+        return data["rates"]["SEK"]
+    except:
+        return 10.5
+
 # ===== AI DAILY SCAN =====
 def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
@@ -454,15 +653,33 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
     print("🔄 Running AI daily scan...")
 
-    assets = safe_fetch(get_market_assets)
     result = []
 
-    for s in assets:
-        price = s.get("price", 0)
-        sig = get_signal(price)
+    assets = market_data_cache.get("data") or safe_fetch(get_market_assets)
 
-        # ✅ historik
-        hist = get_historical_data(s["t"], "1mo")
+    if not assets:
+        print("⚠️ No cache – using fallback market fetch")
+        assets = safe_fetch(get_market_assets)
+
+    for s in assets:
+        
+        if "type" not in s:
+            s["type"] = "stock"
+
+        if not is_tradeable(s):
+            continue
+
+        price = s.get("price", 0)
+
+        if isinstance(price, dict):
+            price = price.get("price", 0)
+
+        sig = get_signal(price)
+       
+        if isinstance(price, dict):
+            price = price.get("price", 0)
+
+        hist = None
 
         prices = []
 
@@ -480,7 +697,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         ma_score = get_ma_score(prices)
 
         # ✅ Justera vikter baserat på strategi
-   
+
         if strategy == "short":
             trend_weight = 5
             rsi_weight = 6
@@ -510,6 +727,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
             + (ma_score * ma_weight)
 
         )
+
+        if s.get("volume", 0) > 5_000_000:
+            total_score += 3
 
         # ✅ kapital-filter
 
@@ -562,15 +782,30 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
         s["signal"] = sig
         s["score"] = max(0, min(100, int(total_score)))
-        s["reason"] = get_reason(sig, price, s["t"])
+        s["reason"] = get_reason(sig, price, s["t"], s)
+        s["summary"] = get_summary(s)
+
+        # ✅ AI confidence (0–100%)
+        s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
+       
+        confidence = (
+            s.get("trigger_score", 0) * 20 +
+            (s.get("score", 0) / 10)
+        )
+
+        s["confidence"] = min(100, int(confidence))
+
 
         # ✅ trigger
         s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
 
         result.append(s)
 
-    # ✅ sortering
-    result = sorted(result, key=lambda x: x["score"], reverse=True)
+    result = sorted(
+        result,
+        key=lambda x: (x.get("trigger_score", 0), x.get("score", 0)),
+        reverse=True
+    )
 
     result = [s for s in result if s["price"] > 0]
 
@@ -582,8 +817,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
     # ✅ cache
     ai_cache["data"] = result
     ai_cache["last_run"] = now
-
+    ai_results_cache["data"] = result
     return result
+
 
 # ===== AI DASHBOARD ANALYSIS =====
 def dashboard_analysis(s):
@@ -1093,6 +1329,7 @@ def get_buy_link(t):
         return f'<"https://www.avanza.se/aktier/sok.html?query={t}" target="_blank">Avanza</a>'
 
 
+
 def format_price(price):
     if price is None:
         return "-"
@@ -1228,27 +1465,39 @@ def render_asset(s, ranked, mode="dashboard"):
         </form>
         """
 
+    # ✅ ANALYS (FIXAD)
     analysis = f"""
-AI: {signal}
-Score: {s.get('score', '-')}
+AI: {signal}<br>
+Score: {s.get('score', '-')}<br><br>
 
-{s.get("reason", "")}
-""".replace("\n", "<br>")
+📊 {s.get("summary", "")}<br><br>
 
-    link = f'<="https://news.google.com/search?q={s["t"]}" target="_blank">🔗 Läs nyheter</a>'
+{s.get("reason", "").replace("\n", "<br>")}
+"""
+
+    # ✅ RIKTIG LÄNK (FIXAD)
+    link = f'<https://news.google.com/search?q={s["t"]}" target="_blank">🔗 Läs mer / nyheter</a>'
 
     return f"""
     <div style="position:relative; margin-bottom:10px;">
 
-    <b>{name} (Score {s.get('score','-')}) {buy_link}</b><br>
+    <b>{name} (Score {s.get('score','-')}) | {buy_link}</b>
     {extra}
     <span class="{cls}">AI: {signal}</span><br>
 
     <span class="ai-box">
         <button type="button" onclick="togglePopup(this)">AI Analys</button>
+
         <div class="ai-popup">
-            <b>AI Analys</b><br>
+
+            <div style="text-align:right;">
+                <button onclick="closePopup(this)" style="background:none;border:none;font-size:16px;">❌</button>
+            </div>
+
+            <b>AI Analys</b><br><br>
+
             {analysis}<br><br>
+
             {link}
         </div>
     </span>
@@ -1258,449 +1507,173 @@ Score: {s.get('score', '-')}
     </div>
     <hr>
     """
-# ===== DASHBOARD =====
-@app.route("/dashboard", methods=["GET","POST"])
+@app.route("/dashboard", methods=["GET", "POST"])
 def dashboard():
 
     user = session.get("user")
-    msg = ""
-
     if not user:
         return redirect("/login")
 
-    amount = int(request.form.get("amount") or 10000)
-
-    ai_strategy = request.form.get("ai_strategy", "short")
-    ai_risk = request.form.get("ai_risk", "medium")
-
-    top_n = int(request.form.get("top_n", 5))
-
-    ranked = ai_cache["data"] if ai_cache["data"] else run_daily_ai(ai_strategy, ai_risk, amount)
-
-    pf = portfolio(user)
-    owned = [p["t"] for p in pf]
-
-
-    # ✅ START – FILTERING PIPELINE
-
-    # 1️⃣ ta bort innehav
-    available = [
-        s for s in ranked 
-        if s["t"] not in owned
-    ]
-
-    # 2️⃣ bara köpvänliga signaler (MEN spara original fallback!)
-    buyable = [
-        s for s in available
-        if s.get("signal") in ["KÖP", "AVVAKTA KÖP"]
-    ]
-
-    # 💡 om inget är buyable → fallback till ALLA (viktig fail-safe)
-    if len(buyable) > 0:
-        available = buyable
-
-    # 3️⃣ kvalitet-filter (soft filter)
-    filtered = [
-        s for s in available 
-        if s.get("score", 0) > 50
-    ]
-
-    # 4️⃣ starkaste kandidater
-    strong = [
-        s for s in available
-        if s.get("score", 0) > 60
-    ]
-
-    # sortera fallback kandidatlista (ALLTID från available)
-    fallback = sorted(
-        available,
-        key=lambda x: x.get("score", 0),
-        reverse=True
-    )
-
-    # ✅ BYGG LISTA MED GARANTI
-
-    combined = []
-
-    # 🥇 1. börja med strong
-    for s in strong:
-        if s not in combined:
-            combined.append(s)
-        if len(combined) >= top_n:
-            break
-
-    # 🥈 2. fyll med filtered (bra men ej topp)
-    if len(combined) < top_n:
-        for s in filtered:
-            if s not in combined:
-                combined.append(s)
-            if len(combined) >= top_n:
-                break
-
-    # 🥉 3. fyll med fallback (ALLT)
-    if len(combined) < top_n:
-        for s in fallback:
-            if s not in combined:
-                combined.append(s)
-            if len(combined) >= top_n:
-                break
-
-
-    # ✅ GARANTI – DIN “AI LAG” (ALDRIG BRYTAS)
-    if len(combined) < top_n:
-        extra = [
-            s for s in ranked 
-            if s not in combined and s["t"] not in owned
-        ]
-        combined += extra[:top_n - len(combined)]
-
-
-    available = combined
-
-
-    # 5️⃣ ta bort duplicates (säkerhet)
-    seen = set()
-    unique = []
-
-    for s in available:
-        if s["t"] not in seen:
-            unique.append(s)
-            seen.add(s["t"])
-
-    available = unique
-
-
-    # ===============================
-    # ✅ SPLIT – STOCK / CRYPTO
-    # ===============================
-
-    stocks = [s for s in available if len(s["t"]) <= 5]
-    crypto = [s for s in available if len(s["t"]) > 5]
-
-    MIN_CRYPTO = 2   # ALLTID DEFINIERAD
-
-    # ✅ KLIV 1
-    if len(crypto) < 2:
-        extra_crypto = [
-            s for s in ranked
-            if len(s["t"]) > 5 and s["t"] not in owned
-        ]
-        crypto += extra_crypto[:2 - len(crypto)]
-
-
-    # ✅ KLIV 2
-    if len(stocks) == 0:
-        stocks = [
-            s for s in ranked
-            if len(s["t"]) <= 5 and s["t"] not in owned
-        ]
-       
-    # ✅ välj crypto att KÖPA
-    crypto_buy = crypto[:MIN_CRYPTO]
-
-    # ✅ resten crypto → AVVAKTA
-    crypto_wait = crypto[MIN_CRYPTO:]
-
-    # ✅ sortera avvakta (bästa först)
-    crypto_wait = sorted(
-        crypto_wait,
-        key=lambda x: x.get("score", 0),
-        reverse=True
-    )
-
-    # ===============================
-    # ✅ FYLL MED AKTIER
-    # ===============================
-
-    needed_stocks = max(0, top_n - len(crypto_buy))
-
-    stocks = sorted(stocks, key=lambda x: x.get("score", 0), reverse=True)
-
-    stock_pick = stocks[:needed_stocks] if stocks else []
-
-    # ===============================
-    # ✅ FINAL LISTA
-    # ===============================
-
-    final_recommendations = stock_pick + crypto_buy
-        
-    # ✅ KLIV 3 – ULTIMATE FAILSAFE
-    if len(final_recommendations) == 0:
-        print("🚨 TOTAL FAIL → forcing fallback")
-
-        final_recommendations = ranked[:top_n]
-
-        for s in final_recommendations:
-            s["forced_signal"] = "KÖP"
-
-    # ✅ sortera bästa först
-    final_recommendations = sorted(
-        final_recommendations,
-        key=lambda x: x.get("score", 0),
-        reverse=True
-    )
-
-    # ✅ säkerställ exakt antal
-    if len(final_recommendations) < top_n:
-        extra = [s for s in available if s not in final_recommendations]
-        final_recommendations += extra[:top_n - len(final_recommendations)]
-
-    # ===============================
-    # ✅ SIGNALER
-    # ===============================
-
-    for s in final_recommendations:
-        s["forced_signal"] = "KÖP"
-
-    for s in crypto_wait:
-        s["forced_signal"] = "AVVAKTA"
-
-    # ===============================
-    # ✅ HANDLE BUY
-    # ===============================
     if request.method == "POST":
+        ranked_tmp = ai_results_cache.get("data") or run_daily_ai("short", "medium", 10000)
 
-        # ✅ AUTO BUY
-        if "auto_buy" in request.form:
-
-            per_stock = amount / top_n if top_n else 0
-            total_bought = []
-
-            for s in final_recommendations:
-
-                price = s["price"]
-
-                if price <= 0:
-                    continue
-
-                qty = max(1, int(per_stock / price))
-
-                buy(user, s["t"], qty, price)
-
-                total_bought.append(f"{s['t']} ({qty} st)")
-
-            msg = "✅ AI köpte: " + ", ".join(total_bought)
-
-
-        # ✅ MANUELL BUY
-        for s in ranked:
+        for s in ranked_tmp:
             t = s["t"]
 
             if f"buy_{t}" in request.form:
                 qty = request.form.get(f"buyqty_{t}")
                 if qty and qty.isdigit():
                     buy(user, t, int(qty), s["price"])
-        
-    stocks = [s for s in final_recommendations if len(s["t"]) <= 5 and s["forced_signal"] == "KÖP"]
-    crypto = [s for s in final_recommendations if len(s["t"]) > 5 and s["forced_signal"] == "KÖP"]
-    dashboard_wait = crypto_wait
 
-    html = f"""
-    <html>
-    <head>
-    <style>
-    body {{
-        font-family: Arial;
-        padding: 10px;
-    }}
+            if f"sell_{t}" in request.form:
+                qty = request.form.get(f"sellqty_{t}")
+                if qty and qty.isdigit():
+                    sell(user, t, int(qty))
 
-    .box-buy {{
-        background: #e6ffe6;
-        border: 2px solid #4CAF50;
-        border-radius: 6px;
-    }}
+    amount = int(request.form.get("amount") or 10000)
+    ai_strategy = request.form.get("ai_strategy", "short")
+    ai_risk = request.form.get("ai_risk", "medium")
+    top_n = int(request.form.get("top_n") or 5)
+    priority = request.form.get("priority", "mix")
+    min_score = int(request.form.get("min_score") or 70)
 
-    .box-wait {{
-        background: #fff8e1;
-        border: 2px solid #ffa500;
-        border-radius: 6px;
-    }}
+    ranked = ai_results_cache.get("data")
 
-    .box-sell {{
-        background: #ffe6e6;
-        border: 2px solid #ff4d4d;
-        border-radius: 6px;
-    }}
+    if not ranked:
+        return "⏳ Laddar AI... vänta 10–30 sek och refresha sidan"
 
-    .ai-box {{
-        position: relative;
-        display: inline-block;
-    }}
+    # ✅ Top 5 global trades (bästa i världen)
+    top_global = [
+        s for s in ranked
+        if s.get("score", 0) >= 75 and s.get("trigger_score", 0) >= 2
+    ][:5]
+    
+    pf = portfolio(user)
 
-    .ai-popup {{
-        display: none;
-        position: absolute;
-        top: 100%;      /* direkt under knapp */
-        left: 0;
-        width: 260px;
-        margin-top: 0;  /* viktigt: inget gap */
-        background: #fff;
-        border: 1px solid #ccc;
-        padding: 10px;
-        z-index: 100;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-    }}
+    sell_list = []
+    buy_more_list = []
+    wait_list = []
+    
+    for s in pf:
+        match = next((x for x in ranked if x["t"] == s["t"]), None)
 
+        if match:
+            current_price = match["price"]
 
-    }}
+            if isinstance(current_price, dict):
+                current_price = current_price.get("price", s["avg_price"])
+        else:
+            current_price = s["avg_price"]
 
-    .ai-box:hover .ai-popup {{
-        display: block;
-    }}
+        pl_pct = (
+            (current_price - s["avg_price"]) / s["avg_price"] * 100
+            if s["avg_price"] else 0
+        )
 
-    .signal-buy {{
-        color: green;
-        font-weight: bold;
-    }}
+        decision, _ = portfolio_ai_decision(
+            pl_pct,
+            current_price,
+            s["avg_price"],
+            s["t"],
+            ai_risk,
+            ai_strategy
+        )
 
-    .signal-wait {{
-        color: orange;
-        font-weight: bold;
-    }}
+        s["price"] = current_price
 
-    .signal-sell {{
-       color: red;
-        font-weight: bold;
-    }}
+        if decision == "SÄLJ":
+            sell_list.append(s)
+        elif decision == "KÖP MER":
+            buy_more_list.append(s)
+        else:
+            wait_list.append(s)
+    
+        # ✅ separera aktier och crypto
+        stock_candidates = [
+            x for x in ranked
+            if x.get("type") != "crypto" and x.get("score", 0) >= min_score
+        ]
 
-    .container {{
-        display:flex;
-        gap:20px;
-    }}
+        crypto_candidates = [
+            x for x in ranked
+            if x.get("type") == "crypto" and x.get("score", 0) >= min_score
+        ]
 
-    .box {{
-        border:1px solid #ccc;
-        padding:10px;
-        width:30%;
-    }}
+        # ✅ crypto kräver trigger
+        crypto_candidates = [
+            x for x in crypto_candidates
+            if x.get("trigger_score", 0) >= 2
+        ]
 
-    .buy-btn {{
-        background:green;
-        color:white;
-    }}
-    </style>
-    </head>
+        # ✅ PRIORITY LOGIK
+        if priority == "stocks":
+            stocks = stock_candidates[:top_n]
 
-    <body>
+            if len(stocks) < top_n:
+                stocks += [
+                    x for x in ranked if x.get("type") != "crypto"
+                ][:top_n - len(stocks)]
 
-    <h1>🚀 Trading ({user})</h1>
+            crypto = crypto_candidates[:top_n]
 
+        elif priority == "crypto":
+            crypto = crypto_candidates[:top_n]
 
-    <div style="
-    background:#eef6ff;
-    border-left:4px solid #3399ff;
-    padding:8px 12px;
-    margin-bottom:15px;
-    display:inline-block;
-    font-size:13px;
-    line-height:1.4;
-    ">
+            if len(crypto) < top_n:
+                crypto += [
+                    x for x in ranked if x.get("type") == "crypto"
+                ][:top_n - len(crypto)]
 
-    <b style="font-size:14px;">Score 0–100</b> (AI-betyg baserat på trend, nyheter och risk)
+            stocks = stock_candidates[:top_n]
 
-    <br><br>
+        else:  # mix
+            stocks = stock_candidates[:top_n]
 
+            if len(stocks) < top_n:
+                stocks = [
+                    x for x in ranked if x.get("type") != "crypto"
+                ][:top_n]
 
-    <strong>Skala:</strong><br>
-    0–20 = Mycket svag ❌<br>
-    21–40 = Svag ⚠️<br>
-    41–60 = Neutral ➖<br>
-    61–80 = Stark ✅<br>
-    81–100 = Mycket stark 🔥
-    </div>
+            crypto = crypto_candidates[:top_n]
 
-    <p style="color:red;">
-    ⚠️ Detta är endast AI-rekommendationer
-    </p>
+        wait = ranked[top_n:top_n*2]
 
-    <a href="/dashboard">📈 Dashboard</a> |
-    <a href="/portfolio">💼 Min portfölj</a> |
-    <a href="/logout">Logout</a>
+    # ✅ usage stats
+    usage = finnhub_calls.get("count", 0)
+    limit = FINNHUB_LIMIT
+    percent = int((usage / limit) * 100) if limit else 0
 
-    <hr>
-
-    <form method="POST">
-    Kapital:
-    <input name="amount" value="{amount}">
-
-    <select name="ai_strategy">
-        <option value="short" {"selected" if ai_strategy=="short" else ""}>Kort</option>
-        <option value="long" {"selected" if ai_strategy=="long" else ""}>Lång</option>
-    </select>
-
-
-    Risk:
-    <select name="ai_risk">
-        <option value="low" {"selected" if ai_risk=="low" else ""}>Låg</option>
-        <option value="medium" {"selected" if ai_risk=="medium" else ""}>Medel</option>
-        <option value="high" {"selected" if ai_risk=="high" else ""}>Hög</option>
-    </select>
-
-
-    Antal:
-    <select name="top_n">
-        <option {"selected" if top_n==3 else ""}>3</option>
-        <option {"selected" if top_n==5 else ""}>5</option>
-        <option {"selected" if top_n==7 else ""}>7</option>
-        <option {"selected" if top_n==9 else ""}>9</option>
-        <option {"selected" if top_n==11 else ""}>11</option>
-        <option {"selected" if top_n==13 else ""}>13</option>
-        <option {"selected" if top_n==15 else ""}>15</option>
-
-    </select>
-
-
-    <button>Analysera</button>
-    <button name="auto_buy">💰 Välj AI-rekommendationer</button>
-    </form>
-
-    <h2>AI Rekommenderar</h2>
-
-    <div class="container">
-    """
-
-    # ===== KÖP =====
-    html += "<div class='box'><h3>KÖP AKTIE</h3>"
-
-    for s in stocks:
-        html += render_asset(s, ranked)
-
-    html += "</div>"
-
-    # ===== KRYPTO =====
-    html += "<div class='box'><h3>KÖP KRYPTO</h3>"
-
-    for s in crypto:
-        html += render_asset(s, ranked)
-        
-    html += "</div>"
-
-
-    # ===== AVVAKTA =====
-    html += "<div class='box'><h3>AVVAKTA TRADE</h3>"
-
-    for s in dashboard_wait:
-        html += render_asset(s, ranked)
-
-    html += "</div>"
-
-    return html
-
+    return render_template(
+        "dashboard.html",
+        user=user,
+        usage=usage,
+        limit=limit,
+        percent=percent,
+        stocks=stocks,
+        crypto=crypto,
+        wait=wait,
+        sell_list=sell_list,
+        buy_more_list=buy_more_list,
+        wait_list=wait_list,
+        amount=amount,
+        ai_strategy=ai_strategy,
+        ai_risk=ai_risk,
+        top_n=top_n,
+        usd_sek=get_usd_sek(),
+        top_global=top_global,
+    )
+    
 # ===== PORTFOLIO =====
 
-@app.route("/portfolio", methods=["GET","POST"])
+@app.route("/portfolio", methods=["GET", "POST"])
 def portfolio_page():
-
     user = session.get("user")
     if not user:
         return redirect("/login")
 
-    pf = portfolio(user)
     ranked = run_daily_ai("short", "medium", 10000)
 
-    # ===== HANDLE BUY / SELL =====
     if request.method == "POST":
-
         for s in ranked:
             t = s["t"]
 
@@ -1714,43 +1687,14 @@ def portfolio_page():
                 if qty and qty.isdigit():
                     sell(user, t, int(qty))
 
-    html = f"""
-    <html>
-    <head>
-        <style>
-            .container {{
-                display: flex;
-                gap: 20px;
-            }}
-
-            .box {{
-                border: 1px solid #ccc;
-                padding: 10px;
-                width: 30%;
-            }}
-        </style>
-    </head>
-
-    <body>
-
-        <h1>📊 Min portfölj</h1>
-
-        <a href="/dashboard">📈 Dashboard</a> |
-        <a href="/portfolio">💼 Min portfölj</a> |
-        <a href="/logout">Logout</a>
-
-        <hr>
-
-        <div class="container">
-    """
+    pf = portfolio(user)
+    ranked = run_daily_ai("short", "medium", 10000)
 
     sell_list = []
     buy_more_list = []
     wait_list = []
 
-    # ===== ANALYS =====
     for s in pf:
-
         match = next((x for x in ranked if x["t"] == s["t"]), None)
         if match:
             s["name"] = match.get("name", s["t"])
@@ -1759,6 +1703,9 @@ def portfolio_page():
             (x["price"] for x in ranked if x["t"] == s["t"]),
             s["avg_price"]
         )
+        
+        if isinstance(current_price, dict):
+            current_price = current_price.get("price", s["avg_price"])
 
         pl_pct = (
             (current_price - s["avg_price"]) / s["avg_price"] * 100
@@ -1785,51 +1732,46 @@ def portfolio_page():
         else:
             wait_list.append(s)
 
-    # ===== ✅ SORTERING (RÄTT PLATS!) =====
+    # ✅ Smart alerts (ingen spam)
+    for s in sell_list:
+        key = f"{user}_{s['t']}_SELL"
+        if alert_cache.get(key) != "sent":
+            send_alert(user, f"🚨 SÄLJ {s['t']} – du äger denna")
+            alert_cache[key] = "sent"
 
-    # SÄLJ → sämsta först (störst förlust)
+    for s in buy_more_list:
+        key = f"{user}_{s['t']}_BUYMORE"
+        if alert_cache.get(key) != "sent":
+            send_alert(user, f"📈 KÖP MER {s['t']} – stark trend")
+            alert_cache[key] = "sent"
+    
     sell_list = sorted(
         sell_list,
         key=lambda x: x.get("price", 0) - x.get("avg_price", 0)
     )
 
-    # KÖP MER → bästa först (vinnare först)
     buy_more_list = sorted(
         buy_more_list,
         key=lambda x: x.get("price", 0) - x.get("avg_price", 0),
         reverse=True
     )
 
-    # AVVAKTA → potential först
     wait_list = sorted(
         wait_list,
         key=lambda x: x.get("price", 0) - x.get("avg_price", 0),
         reverse=True
     )
 
-    # ===== UI =====
+    
+    return render_template(
+        "portfolio.html",
+        sell_list=sell_list,
+        buy_more_list=buy_more_list,
+        wait_list=wait_list,
+        usd_sek=get_usd_sek(),
+        user=user
+    )
 
-    # SÄLJ
-    html += "<div class='box'><h3>SÄLJ</h3>"
-    for s in sell_list:
-        html += render_asset(s, ranked, mode="portfolio")
-    html += "</div>"
-
-    # KÖP MER
-    html += "<div class='box'><h3>KÖP MER</h3>"
-    for s in buy_more_list:
-        html += render_asset(s, ranked, mode="portfolio")
-    html += "</div>"
-
-    # AVVAKTA
-    html += "<div class='box'><h3>AVVAKTA</h3>"
-    for s in wait_list:
-        html += render_asset(s, ranked, mode="portfolio")
-    html += "</div>"
-
-    html += "</div>"
-
-    return html
 
 # ===== HOME =====
 
@@ -1837,6 +1779,32 @@ def portfolio_page():
 def home():
     return redirect("/login")
 
-if __name__=="__main__":
-        port = int(os.environ.get("PORT", 10000))
-        app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+
+    # ✅ Auto refresh AI var 10 min
+    def auto_refresh_ai():
+        while True:
+            print("🔄 Auto-refresh AI")
+            safe_fetch(lambda: run_daily_ai("short", "medium", 10000))
+            time.sleep(600)  # 600 sek = 10 min
+
+    threading.Thread(target=auto_refresh_ai, daemon=True).start()
+
+    # ✅ Kör AI i bakgrunden direkt vid start
+    def preload_ai():
+        print("🚀 Preloading AI...")
+        safe_fetch(lambda: run_daily_ai("short", "medium", 10000))
+
+    threading.Thread(target=preload_ai, daemon=True).start()
+
+    # =====TEMPORARY DISABLED BACKGROUND SCAN =====#
+    # t = threading.Thread(target=scan_market_background)
+    # t.daemon = True
+    # t.start()
+
+    app.run(host="0.0.0.0", port=port)
+
+
+
