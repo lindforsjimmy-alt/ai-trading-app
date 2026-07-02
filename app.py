@@ -14,6 +14,7 @@ import finnhub
 import pandas as pd
 import threading
 from sp500_list import SP500_SYMBOLS
+from trading import buy, sell
 
     # ===== CONFIG / APP SETUP =====
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
@@ -1001,29 +1002,7 @@ def portfolio(user):
     return result
 
 # ===== TRADE =====
-def buy(user,t,qty,price):
-    with open(DATA_FILE,"a") as f:
-        f.write(f"{user}|{t}|{qty}|{price}\n")
-
-def sell(user,t,qty):
-    lines=open(DATA_FILE).readlines()
-    new=[]
-    for l in lines:
-        u,ticker,q,p=l.strip().split("|")
-        q=int(float(q))
-
-        if u==user and ticker==t:
-            if qty>=q:
-                qty-=q
-                if qty <= 0:
-                    continue
-            else:
-                new.append(f"{u}|{ticker}|{q-qty}|{p}\n")
-                qty=0
-        else:
-            new.append(l)
-
-    open(DATA_FILE,"w").writelines(new)
+# Trade-funktioner flyttade till trading.py och importeras högst upp
 
 # ===== AUTH (all user) =====
 # ===== APPROVAL SYSTEM =====
