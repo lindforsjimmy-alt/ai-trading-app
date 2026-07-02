@@ -1,5 +1,7 @@
 
     # ===== IMPORTS =====
+from typing import assert_type
+
 from flask import Flask, redirect, session, request, render_template
 import os, requests, time, feedparser, math, hashlib
 try:
@@ -11,7 +13,6 @@ from datetime import timedelta
 import finnhub
 import pandas as pd
 import threading
-from main import signal
 from sp500_list import SP500_SYMBOLS
 
     # ===== CONFIG / APP SETUP =====
@@ -202,6 +203,26 @@ def get_global_stock_universe():
 
     return symbols[:2000]
 
+def market_scanner():
+
+    symbols = get_global_stock_universe()
+
+    candidates = []
+
+    for sym in symbols:
+
+        # ✅ tillåt fler aktier
+        if len(sym) > 8:
+            continue
+
+        candidates.append(sym)
+
+    candidates = candidates[:150]
+
+    print(f"✅ Scanner hittade {len(candidates)} kandidater")
+
+    return candidates
+
 # ✅ AKTIER (Finnhub + Yahoo fallback)
 def get_stock_assets(symbols):
 
@@ -309,7 +330,7 @@ def get_market_assets():
     return assets
 
 def scan_market_background():
-    symbols = get_global_stock_universe()
+    symbols = market_scanner()
 
     BATCH = 60
     all_assets = []
@@ -503,25 +524,25 @@ def is_tradeable(s):
 
     price = s.get("price", 0)
     volume = s.get("volume", 0)
-    symbol = s.get("t")
+    asset_type = s.get("type")
 
-    # ✅ FIX: hantera om price råkar vara dict
+    # ✅ FIX price dict
     if isinstance(price, dict):
         price = price.get("price", 0)
 
     # ✅ STOCK LOGIK
-    asset_type = s.get("type")
-
-    # ✅ STOCK LOGIK
     if asset_type == "stock":
-        if price < 5:
+
+        if price < 1:
             return False
 
-        if volume < 1_000_000:
+        # Yahoo volume = 0 → ignorera
+        if volume and volume < 200_000:
             return False
 
     # ✅ CRYPTO LOGIK
     elif asset_type == "crypto":
+
         if price < 0.1:
             return False
 
@@ -660,8 +681,10 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
     print("🔄 Running AI daily scan...")
 
     result = []
-
-    assets = market_data_cache.get("data") or safe_fetch(get_market_assets)
+  
+    symbols = market_scanner()
+    assets = get_stock_assets(symbols)
+    assets += get_crypto_assets()[:40]  # begränsa cryp
 
     if not assets:
         print("⚠️ No cache – using fallback market fetch")
@@ -685,7 +708,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         if isinstance(price, dict):
             price = price.get("price", 0)
 
-        hist = None
+        hist = get_historical_data(s["t"], "3mo")
 
         prices = []
 
@@ -734,6 +757,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
         )
 
+        if s.get("type") == "stock":
+            total_score += 5
+
         if s.get("volume", 0) > 5_000_000:
             total_score += 3
 
@@ -750,15 +776,15 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         if strategy == "short":
 
             if trend_score < 0:
-                total_score -= 4
+                total_score -= 2
 
             if rsi_score < 0:
-                total_score -= 5
+                total_score -= 2
 
         elif strategy == "long":
 
             if trend_score < 0:
-                continue  # strikt
+                total_score -= 3
 
             if ma_score < 0:
                 continue  # viktigt för långsiktigt
@@ -784,7 +810,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
         # ===== FILTER 3: momentum krav =====
         if trend_score <= 0 and ma_score <= 0:
-            total_score -= 5
+            total_score -= 2
 
         s["signal"] = sig
         s["score"] = max(0, min(100, int(total_score)))
@@ -812,6 +838,11 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         key=lambda x: (x.get("trigger_score", 0), x.get("score", 0)),
         reverse=True
     )
+
+    stock_results = [x for x in result if x.get("type") == "stock"]
+
+    if len(stock_results) > 0:
+        result = stock_results[:10] + result
 
     result = [s for s in result if s["price"] > 0]
 
@@ -925,7 +956,7 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
     return "Avvakta", "No strong signal"
 
 # ===== DATA (portfolio & trades) =====
-# ===== PORTFOLIO DATA =====
+# ===== DATA =====
 
 def portfolio(user):
     data = {}
@@ -1329,10 +1360,11 @@ def send_reset_email(email):
 
 # ===== UI HELPERS =====
 def get_buy_link(t):
+    # Returnerar en korrekt HTML-länk till köp-sidor beroende på asset
     if len(t) > 5:
-        return f'<"https://safello.com/sv/kop/{t.lower()}" target="_blank">Safello</a>'
+        return f'<a href="https://safello.com/sv/kop/{t.lower()}" target="_blank">Safello</a>'
     else:
-        return f'<"https://www.avanza.se/aktier/sok.html?query={t}" target="_blank">Avanza</a>'
+        return f'<a href="https://www.avanza.se/aktier/sok.html?query={t}" target="_blank">Avanza</a>'
 
 
 
@@ -1482,7 +1514,7 @@ Score: {s.get('score', '-')}<br><br>
 """
 
     # ✅ RIKTIG LÄNK (FIXAD)
-    link = f'<https://news.google.com/search?q={s["t"]}" target="_blank">🔗 Läs mer / nyheter</a>'
+    link = f'<a href="https://news.google.com/search?q={s["t"]}" target="_blank">🔗 Läs mer / nyheter</a>'
 
     return f"""
     <div style="position:relative; margin-bottom:10px;">
@@ -1539,12 +1571,21 @@ def dashboard():
                     sell(user, t, int(qty))
 
     # ✅ SETTINGS
-    amount = int(request.form.get("amount") or 10000)
-    ai_strategy = request.form.get("ai_strategy", "short")
-    ai_risk = request.form.get("ai_risk", "medium")
-    top_n = int(request.form.get("top_n") or 5)
-    priority = request.form.get("priority", "mix")
-    min_score = int(request.form.get("min_score") or 70)
+ 
+    amount = int(request.form.get("amount") or session.get("amount", 10000))
+    ai_strategy = request.form.get("ai_strategy") or session.get("ai_strategy", "short")
+    ai_risk = request.form.get("ai_risk") or session.get("ai_risk", "medium")
+    top_n = int(request.form.get("top_n") or session.get("top_n", 5))
+    priority = request.form.get("priority") or session.get("priority", "mix")
+    min_score = int(request.form.get("min_score") or session.get("min_score", 70))
+
+    # ✅ Spara i session (DETTA ÄR NYCKELN)
+    session["amount"] = amount
+    session["ai_strategy"] = ai_strategy
+    session["ai_risk"] = ai_risk
+    session["top_n"] = top_n
+    session["priority"] = priority
+    session["min_score"] = min_score
     
     ranked = ai_results_cache.get("data")
 
@@ -1585,13 +1626,19 @@ def dashboard():
             if s["avg_price"] else 0
         )
 
+        pf_strategy = request.form.get("pf_strategy") or session.get("pf_strategy", ai_strategy)
+        pf_risk = request.form.get("pf_risk") or session.get("pf_risk", ai_risk)
+
+        session["pf_strategy"] = pf_strategy
+        session["pf_risk"] = pf_risk
+
         decision, _ = portfolio_ai_decision(
             pl_pct,
             current_price,
             s["avg_price"],
             s["t"],
-            ai_risk,
-            ai_strategy
+            pf_risk,
+            pf_strategy
         )
 
         s["price"] = current_price
@@ -1658,6 +1705,7 @@ def dashboard():
     limit = FINNHUB_LIMIT
     percent = int((usage / limit) * 100) if limit else 0
 
+    # Passa listor till mallen så Jinja kan iterera över dem
     return render_template(
         "dashboard.html",
         user=user,
@@ -1674,10 +1722,12 @@ def dashboard():
         ai_strategy=ai_strategy,
         ai_risk=ai_risk,
         top_n=top_n,
+        min_score=min_score,
+        priority=priority,
         usd_sek=get_usd_sek(),
         top_global=top_global,
     )
-    
+        
 # ===== PORTFOLIO =====
 
 @app.route("/portfolio", methods=["GET", "POST"])
@@ -1779,12 +1829,18 @@ def portfolio_page():
 
     
     return render_template(
-        "portfolio.html",
+        "dashboard.html",
+        user=user,
+        usd_sek=get_usd_sek(),
         sell_list=sell_list,
         buy_more_list=buy_more_list,
         wait_list=wait_list,
-        usd_sek=get_usd_sek(),
-        user=user
+        pf_strategy=session.get("pf_strategy", "short"),
+        pf_risk=session.get("pf_risk", "medium"),
+        # ge tomma listor för att undvika Jinja-fel om sidan renderas utan AI-data
+        stocks=[],
+        crypto=[],
+        wait=[],
     )
 
 
@@ -1798,28 +1854,24 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
 
-    # ✅ Auto refresh AI var 10 min
+    # ✅ Auto refresh AI (AVSTÄNGD för debugging)
     def auto_refresh_ai():
         while True:
             print("🔄 Auto-refresh AI")
             safe_fetch(lambda: run_daily_ai("short", "medium", 10000))
-            time.sleep(600)  # 600 sek = 10 min
+            time.sleep(1800)
 
-    threading.Thread(target=auto_refresh_ai, daemon=True).start()
+    # threading.Thread(target=auto_refresh_ai, daemon=True).start()
 
-    # ✅ Kör AI i bakgrunden direkt vid start
+    # ✅ Preload AI (AVSTÄNGD för nu)
     def preload_ai():
         print("🚀 Preloading AI...")
         safe_fetch(lambda: run_daily_ai("short", "medium", 10000))
 
-    threading.Thread(target=preload_ai, daemon=True).start()
+    # threading.Thread(target=preload_ai, daemon=True).start()
 
-    # =====TEMPORARY DISABLED BACKGROUND SCAN =====#
+    # ✅ Background scanner (AVSTÄNGD för nu)
     # t = threading.Thread(target=scan_market_background)
     # t.daemon = True
-    # t.start()
 
     app.run(host="0.0.0.0", port=port)
-
-
-

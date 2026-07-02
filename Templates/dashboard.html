@@ -2,13 +2,19 @@
 <html>
 
 <head>
-    <!-- <meta http-equiv="refresh" content="90"> -->
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <style>
         body {
             font-family: Arial;
             padding: 10px;
+        }
+
+        .asset-box {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #ffffff;
         }
 
         .top {
@@ -53,6 +59,12 @@
             border: 1px solid #ccc;
             z-index: 100;
         }
+
+        .score-box {
+            background: #eef6ff;
+            padding: 12px;
+            border-radius: 6px;
+        }
     </style>
 
     <script>
@@ -60,6 +72,7 @@
             let popup = btn.nextElementSibling;
             popup.style.display = popup.style.display === "block" ? "none" : "block";
         }
+
         function closePopup(btn) {
             btn.parentElement.style.display = "none";
         }
@@ -67,18 +80,12 @@
         function showTab(tab) {
             document.getElementById("dashboard-tab").style.display = "none";
             document.getElementById("portfolio-tab").style.display = "none";
-
             document.getElementById(tab + "-tab").style.display = "block";
         }
 
         window.onload = function () {
-            if (!window.location.hash) {
-                showTab('dashboard');
-            } else {
-                showTab(window.location.hash.substring(1));
-            }
+            showTab('dashboard');
         }
-
     </script>
 
 </head>
@@ -87,109 +94,133 @@
 
     <h1>🚀 Trading ({{ user }})</h1>
 
-    <div style="margin-bottom:15px;">
-
-        <button onclick="showTab('dashboard')">📈 Dashboard</button>
-        <button onclick="showTab('portfolio')">💼 Min Portfolio</button>
-
-    </div>
+    <button onclick="showTab('dashboard')">📈 Dashboard</button>
+    <button onclick="showTab('portfolio')">💼 Portfolio</button>
 
     <hr>
+    <div id="dashboard-tab">
 
-    <div class="top">
+        <div class="top">
 
-        <form method="POST">
+            <form method="POST">
 
-            Kapital:<br>
-            <input name="amount" value="{{ amount }}"><br><br>
+                Kapital:<br>
+                <input name="amount" value="{{ amount }}"><br><br>
 
-            Strategi:<br>
+                Ranka högst:<br>
+                <select name="priority">
+                    <option value="stocks" {% if priority=="stocks" %}selected{% endif %}>Aktier</option>
+                    <option value="crypto" {% if priority=="crypto" %}selected{% endif %}>Krypto</option>
+                    <option value="mix" {% if priority=="mix" %}selected{% endif %}>Blanda</option>
+                </select><br><br>
 
-            Ranka högst:<br>
-            <select name="priority">
-                <option value="stocks" {% if priority=="stocks" %}selected{% endif %}>Aktier</option>
-                <option value="crypto" {% if priority=="crypto" %}selected{% endif %}>Krypto</option>
-                <option value="mix" {% if priority=="mix" %}selected{% endif %}>Blanda</option>
-            </select><br><br>
+                Strategi:<br>
+                <select name="ai_strategy">
+                    <option value="short" {% if ai_strategy=="short" %}selected{% endif %}>Kort</option>
+                    <option value="long" {% if ai_strategy=="long" %}selected{% endif %}>Lång</option>
+                </select><br><br>
 
-            <select name="ai_strategy">
-                <option value="short" {% if ai_strategy=="short" %}selected{% endif %}>Kort</option>
-                <option value="long" {% if ai_strategy=="long" %}selected{% endif %}>Lång</option>
-            </select><br><br>
+                Risk:<br>
+                <select name="ai_risk">
+                    <option value="low" {% if ai_risk=="low" %}selected{% endif %}>Låg</option>
+                    <option value="medium" {% if ai_risk=="medium" %}selected{% endif %}>Medel</option>
+                    <option value="high" {% if ai_risk=="high" %}selected{% endif %}>Hög</option>
+                </select><br><br>
 
-            Risk:<br>
-            <select name="ai_risk">
-                <option value="low" {% if ai_risk=="low" %}selected{% endif %}>Låg</option>
-                <option value="medium" {% if ai_risk=="medium" %}selected{% endif %}>Medel</option>
-                <option value="high" {% if ai_risk=="high" %}selected{% endif %}>Hög</option>
-            </select><br><br>
+                Antal:<br>
+                <select name="top_n">
+                    <option value="3" {% if top_n==3 %}selected{% endif %}>3</option>
+                    <option value="5" {% if top_n==5 %}selected{% endif %}>5</option>
+                    <option value="7" {% if top_n==7 %}selected{% endif %}>7</option>
+                </select><br><br>
 
-            Antal:<br>
-            <select name="top_n">
-                <option value="3" {% if top_n==3 %}selected{% endif %}>3</option>
-                <option value="5" {% if top_n==5 %}selected{% endif %}>5</option>
-                <option value="7" {% if top_n==7 %}selected{% endif %}>7</option>
-                <option value="9" {% if top_n==9 %}selected{% endif %}>9</option>
-                <option value="11" {% if top_n==11 %}selected{% endif %}>11</option>
-                <option value="13" {% if top_n==13 %}selected{% endif %}>13</option>
-                <option value="15" {% if top_n==15 %}selected{% endif %}>15</option>
-            </select><br><br>
+                Minimum score:<br><br>
 
-            Minimum score:
-            <input name="min_score" value="{{ min_score }}"><br><br>
+                <label>
+                    <input type="radio" name="min_score" value="40" {% if min_score==40 %}checked{% endif %}>
+                    41–100
+                </label>
 
-            <button>Analysera</button>
+                <label>
+                    <input type="radio" name="min_score" value="60" {% if min_score==60 %}checked{% endif %}>
+                    61–100
+                </label>
 
-        </form>
+                <label>
+                    <input type="radio" name="min_score" value="80" {% if min_score==80 %}checked{% endif %}>
+                    81–100
+                </label>
 
-        <div style="background:#eef6ff;padding:10px;">
-            <b>Score 0–100</b><br><br>
-            0–20 → Svag<br>
-            21–40 → Svag<br>
-            41–60 → Neutral<br>
-            61–80 → Stark<br>
-            81–100 → Mycket stark
+                <br><br>
+
+                <button>Analysera</button>
+
+            </form>
+
+            <div class="score-box">
+
+                <b>📊 Score (0–100)</b><br><br>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>0–20</b> → Svag</span>
+                    <span>⛔</span>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>21–40</b> → Svag</span>
+                    <span>🟠</span>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>41–60</b> → Neutral</span>
+                    <span>⚖️</span>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>61–80</b> → Stark</span>
+                    <span>📈</span>
+                </div>
+
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>81–100</b> → Mycket stark</span>
+                    <span>🔥</span>
+                </div>
+
+            </div>
+
         </div>
 
-    </div>
-    <div id="dashboard-tab">
         <div class="container">
-
             <!-- AKTIER -->
             <div class="box">
                 <h3>KÖP AKTIER</h3>
 
                 {% for s in stocks %}
-                <div style="position:relative; display:inline-block; width:100%;">
+                <div class="asset-box">
 
                     <b>{{ s.t }}</b><br>
+                    Pris: {{ '%.2f' % s.price }} USD<br>
 
-                    Pris: {{ '%.2f' % s.price }} USD
-                    (≈ {{ (s.price*usd_sek)|round(0) }} SEK)<br>
-
-                    Score: {{ s.score }}
-                    {% if s.score >= 80 %} 🔥
-                    {% elif s.score >= 60 %} ✅
-                    {% else %} ➖
-                    {% endif %}<br>
-
-                    Trigger: {{ s.trigger_score }}<br>
-                    Confidence: {{ s.confidence }}%<br>
+                    Score: {{ s.score }}<br>
 
                     <span class="{% if s.signal=='KÖP' %}signal-buy{% else %}signal-wait{% endif %}">
                         {{ s.signal }}
-                    </span><br>
+                    </span><br><br>
 
-                    <button onclick="togglePopup(this)">AI Analys</button>
+                    <a href="https://www.avanza.se/aktier/sok.html?query={{ s.t }}" target="_blank">🔗
+                        Avanza</a><br><br>
+
+                    <button onclick="togglePopup(this)">AI</button>
 
                     <div class="ai-popup">
-
                         <button onclick="closePopup(this)">❌</button>
-
-                        <b>{{ s.summary }}</b><br><br>
-                        {{ s.reason }}
-
+                        {{ s.summary }}
                     </div>
+
+                    <form method="POST">
+                        <input name="buyqty_{{ s.t }}">
+                        <button name="buy_{{ s.t }}">Köp</button>
+                    </form>
 
                 </div>
                 <hr>
@@ -202,36 +233,11 @@
                 <h3>KÖP KRYPTO</h3>
 
                 {% for s in crypto %}
-                <div style="position:relative; display:inline-block; width:100%;">
+                <div class="asset-box">
 
                     <b>{{ s.t }}</b><br>
 
-                    Pris: {{ '%.2f' % s.price }} USD
-                    (≈ {{ (s.price*usd_sek)|round(0) }} SEK)<br>
-
-                    Score: {{ s.score }}
-                    {% if s.score >= 80 %} 🔥
-                    {% elif s.score >= 60 %} ✅
-                    {% else %} ➖
-                    {% endif %}<br>
-
-                    Trigger: {{ s.trigger_score }}<br>
-                    Confidence: {{ s.confidence }}%<br>
-
-                    <span class="{% if s.signal=='KÖP' %}signal-buy{% else %}signal-wait{% endif %}">
-                        {{ s.signal }}
-                    </span>
-
-                    <button onclick="togglePopup(this)">AI Analys</button>
-
-                    <div class="ai-popup">
-
-                        <button onclick="closePopup(this)">❌</button>
-
-                        <b>{{ s.summary }}</b><br><br>
-                        {{ s.reason }}
-
-                    </div>
+                    <a href="https://safello.com/sv/kop/{{ s.t|lower }}" target="_blank">🔗 Safello</a>
 
                 </div>
                 <hr>
@@ -244,109 +250,41 @@
                 <h3>AVVAKTA</h3>
 
                 {% for s in wait %}
-                <div>
-                    <b>{{ s.t }}</b><br>
-                    Score: {{ s.score }}<br>
-                    <span class="signal-wait">AVVAKTA</span>
-                </div>
-                <hr>
+                <b>{{ s.t }}</b><br>
                 {% endfor %}
 
             </div>
 
         </div>
     </div>
-    <hr>
+
+
+    <!-- ✅ PORTFOLIO TAB -->
     <div id="portfolio-tab" style="display:none;">
 
         <h2>💼 Portfolio</h2>
 
-        <div class="container">
+        <form method="POST">
 
-            <!-- SÄLJ -->
-            <div class="box">
-                <h3>SÄLJ</h3>
+            Strategi:<br>
+            <select name="pf_strategy">
+                <option value="short" {% if pf_strategy=="short" %}selected{% endif %}>Kort</option>
+                <option value="long" {% if pf_strategy=="long" %}selected{% endif %}>Lång</option>
+            </select><br><br>
 
-                {% for s in sell_list %}
-                <div>
+            Risk:<br>
+            <select name="pf_risk">
+                <option value="low" {% if pf_risk=="low" %}selected{% endif %}>Låg</option>
+                <option value="medium" {% if pf_risk=="medium" %}selected{% endif %}>Medel</option>
+                <option value="high" {% if pf_risk=="high" %}selected{% endif %}>Hög</option>
+            </select><br><br>
 
-                    <b>{{ s.t }}</b><br>
+            <button>Analysera Portfolio</button>
 
-                    Antal: {{ s.qty }}<br>
-                    Snitt: {{ s.avg_price }}<br>
+        </form>
 
-                    Pris: {{ '%.2f' % s.price }} USD
-                    (≈ {{ (s.price*usd_sek)|round(0) }} SEK)<br>
-
-                    <span class="signal-sell">SÄLJ</span><br>
-
-                    <form method="POST">
-                        <input name="sellqty_{{ s.t }}" placeholder="antal">
-                        <button name="sell_{{ s.t }}">Sälj</button>
-                    </form>
-
-                </div>
-                <hr>
-                {% endfor %}
-
-            </div>
-
-            <!-- KÖP MER -->
-            <div class="box">
-                <h3>KÖP MER</h3>
-
-                {% for s in buy_more_list %}
-                <div>
-
-                    <b>{{ s.t }}</b><br>
-
-                    Antal: {{ s.qty }}<br>
-                    Snitt: {{ s.avg_price }}<br>
-
-                    Pris: {{ '%.2f' % s.price }} USD
-                    (≈ {{ (s.price*usd_sek)|round(0) }} SEK)<br>
-
-                    <span class="{% if s.signal=='KÖP' %}signal-buy{% else %}signal-wait{% endif %}">
-                        {{ s.signal }}
-                    </span>
-
-                    <form method="POST">
-                        <input name="buyqty_{{ s.t }}" placeholder="antal">
-                        <button name="buy_{{ s.t }}">Köp</button>
-                    </form>
-
-                </div>
-                <hr>
-                {% endfor %}
-
-            </div>
-
-            <!-- AVVAKTA -->
-            <div class="box">
-                <h3>AVVAKTA</h3>
-
-                {% for s in wait_list %}
-                <div>
-
-                    <b>{{ s.t }}</b><br>
-
-                    Antal: {{ s.qty }}<br>
-                    Snitt: {{ s.avg_price }}<br>
-
-                    Pris: {{ '%.2f' % s.price }} USD
-                    (≈ {{ (s.price*usd_sek)|round(0) }} SEK)<br>
-
-                    <span class="signal-wait">AVVAKTA</span>
-
-                </div>
-                <hr>
-                {% endfor %}
-
-            </div>
-
-        </div>
     </div>
-    </div>
+
 </body>
 
 </html>
