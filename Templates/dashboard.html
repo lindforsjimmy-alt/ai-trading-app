@@ -653,6 +653,22 @@
             font-size: 0.88rem;
         }
 
+        .alerts-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: nowrap;
+            margin-top: 6px;
+        }
+
+        .alerts-row label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            font-size: 0.9rem;
+        }
+
         .score-box div {
             margin-bottom: 10px;
         }
@@ -1329,15 +1345,16 @@
                 <input type="hidden" name="min_score" value="0">
 
                 <b>Alerts</b><br>
-                <label>
-                    <input type="checkbox" name="send_buy_alerts" {% if send_buy_alerts %}checked{% endif %}>
-                    Skicka köp-alerts
-                </label><br>
-
-                <label>
-                    <input type="checkbox" name="send_sell_alerts" {% if send_sell_alerts %}checked{% endif %}>
-                    Skicka sälj-alerts
-                </label>
+                <div class="alerts-row">
+                    <label>
+                        <input type="checkbox" name="send_buy_alerts" {% if send_buy_alerts %}checked{% endif %}>
+                        Skicka köp-alerts
+                    </label>
+                    <label>
+                        <input type="checkbox" name="send_sell_alerts" {% if send_sell_alerts %}checked{% endif %}>
+                        Skicka sälj-alerts
+                    </label>
+                </div>
 
                 <br><br>
 

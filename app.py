@@ -3,6 +3,7 @@
 # ===== IMPORTS =====
 from typing import assert_type
 import builtins as _builtins
+import json
 
 from flask import Flask, redirect, session, request, render_template, send_file, jsonify
 import os, requests, time, feedparser, math, hashlib, logging, secrets, string
@@ -69,6 +70,8 @@ DATA_FILE = "stock_data/my_trades.txt"
 USERS_FILE = "stock_data/users.txt"
 ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
+USER_SETTINGS_FILE = "stock_data/user_settings.json"
+USER_SETTINGS_LOCK = threading.Lock()
 
 MIN_TREND_INDEX_OPTIONS = {
     "OMX": {"symbol": "^OMX", "name": "OMX Stockholm"},
@@ -136,6 +139,70 @@ os.makedirs("stock_data", exist_ok=True)
 open(DATA_FILE, "a").close()
 open(USERS_FILE, "a").close()
 open(ADMINS_FILE, "a").close()
+if not os.path.exists(USER_SETTINGS_FILE):
+    with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+
+
+def load_user_settings(email):
+    target = (email or "").strip().lower()
+    if not target:
+        return {}
+
+    try:
+        raw = open(USER_SETTINGS_FILE, encoding="utf-8").read().strip()
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    user_settings = data.get(target, {})
+    return user_settings if isinstance(user_settings, dict) else {}
+
+
+def save_user_settings(email, updates):
+    target = (email or "").strip().lower()
+    if not target or not isinstance(updates, dict):
+        return
+
+    with USER_SETTINGS_LOCK:
+        current_data = {}
+        try:
+            raw = open(USER_SETTINGS_FILE, encoding="utf-8").read().strip()
+            current_data = json.loads(raw) if raw else {}
+        except Exception:
+            current_data = {}
+
+        if not isinstance(current_data, dict):
+            current_data = {}
+
+        user_settings = current_data.get(target, {})
+        if not isinstance(user_settings, dict):
+            user_settings = {}
+
+        user_settings.update(updates)
+        current_data[target] = user_settings
+
+        with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(current_data, f, ensure_ascii=True, indent=2, sort_keys=True)
+
+
+def coerce_bool_setting(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    txt = str(value).strip().lower()
+    if txt in {"1", "true", "yes", "on"}:
+        return True
+    if txt in {"0", "false", "no", "off", ""}:
+        return False
+    return default
 
 # ===== HASH =====
 
@@ -4138,17 +4205,55 @@ def dashboard():
         return redirect("/dashboard?tab=mintrend")
 
     # ✅ SETTINGS
- 
-    amount = parse_capital_amount(request.form.get("amount"), session.get("amount", 10000))
-    capital_currency = (request.form.get("capital_currency") or session.get("capital_currency", "SEK")).upper()
+
+    user_settings = load_user_settings(user)
+    settings_form_submitted = (
+        request.method == "POST"
+        and (
+            "amount" in request.form
+            or "capital_currency" in request.form
+            or "ai_strategy" in request.form
+            or "ai_risk" in request.form
+            or "top_n" in request.form
+            or "priority" in request.form
+            or "send_buy_alerts" in request.form
+            or "send_sell_alerts" in request.form
+            or "pf_strategy" in request.form
+            or "pf_risk" in request.form
+        )
+    )
+
+    amount = parse_capital_amount(
+        request.form.get("amount"),
+        session.get("amount", user_settings.get("amount", 10000)),
+    )
+    capital_currency = (
+        request.form.get("capital_currency")
+        or session.get("capital_currency")
+        or user_settings.get("capital_currency", "SEK")
+    ).upper()
     if capital_currency not in {"SEK", "USD", "EUR"}:
         capital_currency = "SEK"
-    ai_strategy = request.form.get("ai_strategy") or session.get("ai_strategy", "short")
-    ai_risk = request.form.get("ai_risk") or session.get("ai_risk", "medium")
-    top_n = int(request.form.get("top_n") or session.get("top_n", 5))
-    priority = request.form.get("priority") or session.get("priority", "mix")
-    send_buy_alerts = request.form.get("send_buy_alerts") == "on" or session.get("send_buy_alerts", True)
-    send_sell_alerts = request.form.get("send_sell_alerts") == "on" or session.get("send_sell_alerts", True)
+    ai_strategy = request.form.get("ai_strategy") or session.get("ai_strategy") or user_settings.get("ai_strategy", "short")
+    ai_risk = request.form.get("ai_risk") or session.get("ai_risk") or user_settings.get("ai_risk", "medium")
+    top_n_raw = request.form.get("top_n") or session.get("top_n") or user_settings.get("top_n", 5)
+    try:
+        top_n = int(top_n_raw)
+    except Exception:
+        top_n = 5
+    priority = request.form.get("priority") or session.get("priority") or user_settings.get("priority", "mix")
+    if settings_form_submitted:
+        send_buy_alerts = request.form.get("send_buy_alerts") == "on"
+        send_sell_alerts = request.form.get("send_sell_alerts") == "on"
+    else:
+        send_buy_alerts = coerce_bool_setting(
+            session.get("send_buy_alerts", user_settings.get("send_buy_alerts", False)),
+            default=False,
+        )
+        send_sell_alerts = coerce_bool_setting(
+            session.get("send_sell_alerts", user_settings.get("send_sell_alerts", False)),
+            default=False,
+        )
     session["amount"] = amount
     session["ai_strategy"] = ai_strategy
     session["ai_risk"] = ai_risk
@@ -4159,10 +4264,26 @@ def dashboard():
     session["send_sell_alerts"] = send_sell_alerts
 
     # Portfolio strategy/risk are independent from dashboard strategy/risk.
-    pf_strategy = request.form.get("pf_strategy") or session.get("pf_strategy", "short")
-    pf_risk = request.form.get("pf_risk") or session.get("pf_risk", "medium")
+    pf_strategy = request.form.get("pf_strategy") or session.get("pf_strategy") or user_settings.get("pf_strategy", "short")
+    pf_risk = request.form.get("pf_risk") or session.get("pf_risk") or user_settings.get("pf_risk", "medium")
     session["pf_strategy"] = pf_strategy
     session["pf_risk"] = pf_risk
+
+    save_user_settings(
+        user,
+        {
+            "amount": amount,
+            "capital_currency": capital_currency,
+            "ai_strategy": ai_strategy,
+            "ai_risk": ai_risk,
+            "top_n": top_n,
+            "priority": priority,
+            "send_buy_alerts": bool(send_buy_alerts),
+            "send_sell_alerts": bool(send_sell_alerts),
+            "pf_strategy": pf_strategy,
+            "pf_risk": pf_risk,
+        },
+    )
     
     ranked = ai_results_cache.get("data") or ai_cache.get("data")
     ai_loading = False
@@ -4559,8 +4680,8 @@ def portfolio_page():
         else:
             wait_list.append(s)
 
-    send_buy_alerts = session.get("send_buy_alerts", True)
-    send_sell_alerts = session.get("send_sell_alerts", True)
+    send_buy_alerts = coerce_bool_setting(session.get("send_buy_alerts", False), default=False)
+    send_sell_alerts = coerce_bool_setting(session.get("send_sell_alerts", False), default=False)
 
     registered_users = load_registered_users() if is_admin else []
     regular_users, admin_users = split_registered_users(registered_users) if is_admin else ([], [])

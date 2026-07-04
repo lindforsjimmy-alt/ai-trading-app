@@ -58,3 +58,12 @@ lindfors.jimmy@outlook.com|JUPUSD|10|1.0
 lindfors.jimmy@outlook.com|COMP|10|15.89
 lindfors.jimmy@outlook.com|AMZN|5|242.67
 lindfors.jimmy@outlook.com|AMZN|5|242.67
+lindfors.jimmy@outlook.com|RIVN|16|18.63
+lindfors.jimmy@outlook.com|XPEV|15|13.08
+lindfors.jimmy@outlook.com|LI|13|12.02
+lindfors.jimmy@outlook.com|NIO|31|4.79
+lindfors.jimmy@outlook.com|XLM|1257|0.209898
+lindfors.jimmy@outlook.com|USDE|264|0.998656
+lindfors.jimmy@outlook.com|LINK|32|8.07
+lindfors.jimmy@outlook.com|LAB|14|15.76
+lindfors.jimmy@outlook.com|USD1|225|0.999042
