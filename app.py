@@ -783,7 +783,7 @@ def get_news_triggers(t):
         return triggers
 
 
-def get_news_score(t):
+def get_news_score(t, allow_network=True):
     now = time.time()
 
     if t in news_cache:
@@ -792,6 +792,11 @@ def get_news_score(t):
             if isinstance(score, dict):
                 return score.get("score", 0)
             return score
+
+    # In web request paths (e.g. dashboard tab switches), avoid blocking
+    # external calls and use neutral fallback when cache is cold.
+    if not allow_network:
+        return 0
 
     data = get_news_triggers(t)
     return data.get("score", 0)
@@ -1814,7 +1819,8 @@ def generate_portfolio_analysis(position, decision, pl_pct, prices=None):
     trend_score = get_trend_score_from_history(prices) if prices else 0
     rsi_value = calculate_rsi(prices) if prices else 50
     ma_score = get_ma_score(prices) if prices else 0
-    news_score = get_news_score(symbol)
+    # Keep dashboard navigation responsive: do not block on live news fetch here.
+    news_score = get_news_score(symbol, allow_network=False)
     
     # Calculate moving averages
     ma50 = calculate_ma(prices, 50) if prices else None
@@ -1975,7 +1981,8 @@ def portfolio_analysis(decision, pl_pct):
 # ===== PORTFOLIO AI =====
 def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy):
 
-    news = get_news_score(t)
+    # Use cached/neutral news in interactive dashboard requests.
+    news = get_news_score(t, allow_network=False)
     trend = 0
     
     # ===== Strategy =====
