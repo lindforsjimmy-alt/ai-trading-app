@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 stock_data/
 .env
+api.env
 users.txt
