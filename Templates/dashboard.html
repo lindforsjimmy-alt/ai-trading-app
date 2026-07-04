@@ -1688,6 +1688,15 @@
                 <button type="submit" name="sell_all_holdings" value="1"
                     style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.35);">Sälj allt
                     innehav</button>
+                <button type="submit" name="follow_ai_sell_recommendations" value="1"
+                    style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.35);">Följ
+                    Ai-rekommendationer SÄLJ</button>
+                <button type="submit" name="follow_ai_buy_more_recommendations" value="1"
+                    style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.35);">Följ
+                    Ai-rekommendationer Köp mer</button>
+                <button type="submit" name="follow_ai_sell_and_buy_recommendations" value="1"
+                    style="background: rgba(56, 189, 248, 0.18); border-color: rgba(56, 189, 248, 0.35);">Följ
+                    Ai-rekommendationer Sälj och Köp</button>
             </div>
 
         </form>
@@ -1761,7 +1770,8 @@
 
                     <form method="POST" style="margin-top: 10px;">
                         <div class="trade-row">
-                            <input type="number" name="buyqty_{{ s.t }}" placeholder="Antal" min="1" required>
+                            <input type="number" name="buyqty_{{ s.t }}" placeholder="Antal" min="1"
+                                value="{{ s.recommended_buy_qty if s.recommended_buy_qty else 1 }}" required>
                             <button type="submit" name="buy_{{ s.t }}"
                                 style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.28);">Köp</button>
                         </div>

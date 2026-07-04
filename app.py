@@ -2112,6 +2112,15 @@ def portfolio_analysis(decision, pl_pct):
     }
 
 # ===== PORTFOLIO AI =====
+def normalize_portfolio_decision(decision):
+    d = (str(decision or "")).strip().upper()
+    if d in {"SÄLJ", "SALJ", "SELL"}:
+        return "SÄLJ"
+    if d in {"KÖP MER", "KOP MER", "BUY MORE", "BUYMORE"}:
+        return "KÖP MER"
+    return "AVVAKTA"
+
+
 def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy):
 
     # Use cached/neutral news in interactive dashboard requests.
@@ -2134,7 +2143,7 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
 
     if pl_pct >= take_profit:
         if news > 0 and trend > 0:
-            return "Avvakta", "Strong trend continues"
+            return "AVVAKTA", "Strong trend continues"
         return "SÄLJ", "Take profit reached"
 
     if pl_pct <= stop_loss:
@@ -2152,7 +2161,7 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
     if -5 < pl_pct < 5 and news > 0:
         return "KÖP MER", "Possible recovery"
 
-    return "Avvakta", "No strong signal"
+    return "AVVAKTA", "No strong signal"
 
 
 def get_ai_recommended_sell_qty(position, decision, pl_pct):
@@ -2160,15 +2169,47 @@ def get_ai_recommended_sell_qty(position, decision, pl_pct):
     if qty <= 0:
         return 0
 
+    if decision != "SÄLJ":
+        return 1
+
     if decision == "SÄLJ":
         if pl_pct <= -8 or pl_pct >= 12:
             return qty
         return min(qty, max(1, int(math.ceil(qty * 0.5))))
 
-    if decision == "KÖP MER":
-        return min(qty, max(1, int(math.ceil(qty * 0.25))))
+    return 1
 
-    return min(qty, max(1, int(math.ceil(qty * 0.15))))
+
+def get_ai_recommended_buy_more_qty(position, decision, pl_pct):
+    qty = int(position.get("qty") or 0)
+    if qty <= 0 or decision != "KÖP MER":
+        return 0
+
+    if pl_pct >= 10:
+        factor = 0.2
+    elif pl_pct >= 5:
+        factor = 0.3
+    else:
+        factor = 0.4
+
+    return max(1, int(math.ceil(qty * factor)))
+
+
+def apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=False, do_buy_more=False):
+    if do_sell:
+        for item in sell_list:
+            owned_qty = int(item.get("qty") or 0)
+            rec_qty = int(item.get("recommended_sell_qty") or 0)
+            qty = min(owned_qty, max(0, rec_qty))
+            if qty > 0:
+                sell(user, item["t"], qty)
+
+    if do_buy_more:
+        for item in buy_more_list:
+            qty = int(item.get("recommended_buy_qty") or 0)
+            price = float(item.get("price") or item.get("avg_price") or 0)
+            if qty > 0 and price > 0:
+                buy(user, item["t"], qty, price)
 
 # ===== DATA (portfolio & trades) =====
 # ===== DATA =====
@@ -4416,16 +4457,20 @@ def dashboard():
                 pf_risk,
                 pf_strategy
             )
+            decision = normalize_portfolio_decision(decision)
 
             s["price"] = current_price
             s["decision"] = decision
             s["reason"] = reason
             s["pl_pct"] = pl_pct
             s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
-            if s["recommended_sell_qty"] >= s.get("qty", 0):
+            s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
+            if decision == "SÄLJ" and s["recommended_sell_qty"] >= s.get("qty", 0):
                 s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
-            else:
+            elif decision == "SÄLJ":
                 s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
+            else:
+                s["sell_recommendation_text"] = ""
 
             # ✅ GENERATE PORTFOLIO ANALYSIS
             hist_data = get_historical_data(s["t"], "3mo")
@@ -4528,6 +4573,18 @@ def dashboard():
                 qty = int(item.get("qty") or 0)
                 if qty > 0:
                     sell(user, item["t"], qty)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_sell_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=True, do_buy_more=False)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_buy_more_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=False, do_buy_more=True)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_sell_and_buy_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=True, do_buy_more=True)
             return redirect("/dashboard?tab=portfolio")
 
         for form_key in request.form.keys():
@@ -4784,16 +4841,20 @@ def portfolio_page():
             pf_risk,
             pf_strategy
         )
+        decision = normalize_portfolio_decision(decision)
 
         s["price"] = current_price
         s["reason"] = reason
         s["signal"] = decision
         s["pl_pct"] = pl_pct
         s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
-        if s["recommended_sell_qty"] >= s.get("qty", 0):
+        s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
+        if decision == "SÄLJ" and s["recommended_sell_qty"] >= s.get("qty", 0):
             s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
-        else:
+        elif decision == "SÄLJ":
             s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
+        else:
+            s["sell_recommendation_text"] = ""
 
         if decision == "SÄLJ":
             sell_list.append(s)
@@ -4801,6 +4862,26 @@ def portfolio_page():
             buy_more_list.append(s)
         else:
             wait_list.append(s)
+
+    if request.method == "POST":
+        if "sell_all_holdings" in request.form:
+            for item in pf:
+                qty = int(item.get("qty") or 0)
+                if qty > 0:
+                    sell(user, item["t"], qty)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_sell_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=True, do_buy_more=False)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_buy_more_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=False, do_buy_more=True)
+            return redirect("/dashboard?tab=portfolio")
+
+        if "follow_ai_sell_and_buy_recommendations" in request.form:
+            apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=True, do_buy_more=True)
+            return redirect("/dashboard?tab=portfolio")
 
     send_buy_alerts = coerce_bool_setting(session.get("send_buy_alerts", False), default=False)
     send_sell_alerts = coerce_bool_setting(session.get("send_sell_alerts", False), default=False)
