@@ -2154,6 +2154,22 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
 
     return "Avvakta", "No strong signal"
 
+
+def get_ai_recommended_sell_qty(position, decision, pl_pct):
+    qty = int(position.get("qty") or 0)
+    if qty <= 0:
+        return 0
+
+    if decision == "SÄLJ":
+        if pl_pct <= -8 or pl_pct >= 12:
+            return qty
+        return min(qty, max(1, int(math.ceil(qty * 0.5))))
+
+    if decision == "KÖP MER":
+        return min(qty, max(1, int(math.ceil(qty * 0.25))))
+
+    return min(qty, max(1, int(math.ceil(qty * 0.15))))
+
 # ===== DATA (portfolio & trades) =====
 # ===== DATA =====
 
@@ -4405,6 +4421,11 @@ def dashboard():
             s["decision"] = decision
             s["reason"] = reason
             s["pl_pct"] = pl_pct
+            s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
+            if s["recommended_sell_qty"] >= s.get("qty", 0):
+                s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
+            else:
+                s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
 
             # ✅ GENERATE PORTFOLIO ANALYSIS
             hist_data = get_historical_data(s["t"], "3mo")
@@ -4502,6 +4523,28 @@ def dashboard():
 
     # ✅ HANDLE BUY/SELL after recommendation lists are built
     if request.method == "POST":
+        if "sell_all_holdings" in request.form:
+            for item in pf:
+                qty = int(item.get("qty") or 0)
+                if qty > 0:
+                    sell(user, item["t"], qty)
+            return redirect("/dashboard?tab=portfolio")
+
+        for form_key in request.form.keys():
+            if not form_key.startswith("sell_"):
+                continue
+            symbol = form_key[len("sell_"):].strip()
+            if not symbol:
+                continue
+            qty_raw = (request.form.get(f"sellqty_{symbol}") or "").strip()
+            try:
+                qty = int(qty_raw)
+            except Exception:
+                qty = 0
+            if qty > 0:
+                sell(user, symbol, qty)
+                return redirect("/dashboard?tab=portfolio")
+
         ranked_tmp = ai_results_cache.get("data") or ranked
         ranked_by_symbol = {x.get("t"): x for x in ranked_tmp}
 
@@ -4531,7 +4574,7 @@ def dashboard():
                 qty = request.form.get(f"sellqty_{t}")
                 if qty and qty.isdigit():
                     sell(user, t, int(qty))
-                    return redirect("/dashboard")
+                    return redirect("/dashboard?tab=portfolio")
 
     selected_symbols = {x.get("t") for x in stocks + crypto}
     watch_candidates = [
@@ -4745,6 +4788,12 @@ def portfolio_page():
         s["price"] = current_price
         s["reason"] = reason
         s["signal"] = decision
+        s["pl_pct"] = pl_pct
+        s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
+        if s["recommended_sell_qty"] >= s.get("qty", 0):
+            s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
+        else:
+            s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
 
         if decision == "SÄLJ":
             sell_list.append(s)

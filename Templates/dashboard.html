@@ -496,6 +496,13 @@
             margin-top: 10px;
         }
 
+        .portfolio-actions-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
         .trade-row input {
             width: 100%;
             padding: 8px 12px;
@@ -1676,7 +1683,12 @@
                 <option value="high" {% if pf_risk=="high" %}selected{% endif %}>Hög</option>
             </select><br><br>
 
-            <button>Analysera Portfolio</button>
+            <div class="portfolio-actions-row">
+                <button>Analysera Portfolio</button>
+                <button type="submit" name="sell_all_holdings" value="1"
+                    style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.35);">Sälj allt
+                    innehav</button>
+            </div>
 
         </form>
 
@@ -1691,6 +1703,9 @@
                     P/L: <span style="color: {% if s.pl_pct > 0 %}#70E000{% else %}#f87171{% endif %};">{{ '%.1f' %
                         s.pl_pct }}%</span><br>
                     Orsak: <span style="font-size:0.9rem;">{{ s.reason }}</span><br><br>
+                    {% if s.sell_recommendation_text %}
+                    <span style="font-size:0.86rem; color:#93c5fd;">{{ s.sell_recommendation_text }}</span><br><br>
+                    {% endif %}
 
                     <button onclick="togglePopup(this)">AI Analys</button>
 
@@ -1708,7 +1723,7 @@
                     <form method="POST" style="margin-top: 10px;">
                         <div class="trade-row">
                             <input type="number" name="sellqty_{{ s.t }}" placeholder="Antal" min="1" max="{{ s.qty }}"
-                                required>
+                                value="{{ s.recommended_sell_qty if s.recommended_sell_qty else 1 }}" required>
                             <button type="submit" name="sell_{{ s.t }}"
                                 style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.28);">Sälj</button>
                         </div>
@@ -1751,6 +1766,15 @@
                                 style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.28);">Köp</button>
                         </div>
                     </form>
+
+                    <form method="POST" style="margin-top: 10px;">
+                        <div class="trade-row">
+                            <input type="number" name="sellqty_{{ s.t }}" placeholder="Antal" min="1" max="{{ s.qty }}"
+                                value="{{ s.recommended_sell_qty if s.recommended_sell_qty else 1 }}" required>
+                            <button type="submit" name="sell_{{ s.t }}"
+                                style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.28);">Sälj</button>
+                        </div>
+                    </form>
                 </div>
                 {% endfor %}
                 {% else %}
@@ -1781,6 +1805,15 @@
                         {{ s.reason }}
                         {% endif %}
                     </div>
+
+                    <form method="POST" style="margin-top: 10px;">
+                        <div class="trade-row">
+                            <input type="number" name="sellqty_{{ s.t }}" placeholder="Antal" min="1" max="{{ s.qty }}"
+                                value="{{ s.recommended_sell_qty if s.recommended_sell_qty else 1 }}" required>
+                            <button type="submit" name="sell_{{ s.t }}"
+                                style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.28);">Sälj</button>
+                        </div>
+                    </form>
                 </div>
                 {% endfor %}
                 {% else %}
