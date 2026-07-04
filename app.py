@@ -897,12 +897,15 @@ def get_news_score(t, allow_network=True):
     return data.get("score", 0)
 
 
-def get_news_sources(t, limit=5):
+def get_news_sources(t, limit=5, allow_network=True):
     """
     Extracts news sources with URLs and sentiment for a given symbol.
     Returns a list of news items with title, URL, and sentiment.
     """
     sources = []
+    if not allow_network:
+        return sources
+
     positive_keywords = ["up", "gain", "profit", "growth", "rise", "surge", "bull", "positive", "strong", "upgrade"]
     negative_keywords = ["down", "loss", "decline", "fall", "drop", "bear", "negative", "weak", "downgrade", "warning"]
     
@@ -1812,7 +1815,8 @@ def generate_investment_analysis(s, prices=None):
     risk_text = ", ".join(risk_factors) if risk_factors else "Låg risknivå"
     
     # ===== GET NEWS SOURCES =====
-    news_sources = get_news_sources(symbol, limit=3)
+    # Avoid blocking request path with live RSS fetch on constrained hosts.
+    news_sources = get_news_sources(symbol, limit=3, allow_network=False)
     news_html = ""
     if news_sources:
         news_html = "<strong>Nyhetskällor:</strong><br>"
@@ -1971,7 +1975,8 @@ def generate_portfolio_analysis(position, decision, pl_pct, prices=None):
         trend_detail = "Otillräcklig historisk data"
     
     # ===== GET NEWS SOURCES =====
-    news_sources = get_news_sources(symbol, limit=2)
+    # Avoid blocking request path with live RSS fetch on constrained hosts.
+    news_sources = get_news_sources(symbol, limit=2, allow_network=False)
     news_html = ""
     if news_sources:
         news_html = "<strong>Senaste nyheterna:</strong><br>"
