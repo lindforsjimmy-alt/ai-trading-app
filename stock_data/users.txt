@@ -1,1 +1,3 @@
-lindfors.jimmy@outlook.com|ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f
+lindfors.jimmy@outlook.com|ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f|Avanza,Safello
+copilot.test.local+1@example.com|082a7a2a81c2733fd03567e47e0b6d9f09d32ec80065bda9c5cd34dd1c4f9edf|Avanza,Safello
+copilot.test.local+1@example.com|082a7a2a81c2733fd03567e47e0b6d9f09d32ec80065bda9c5cd34dd1c4f9edf|Avanza,Safello
