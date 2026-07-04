@@ -660,9 +660,42 @@ ai_cache = {
 "data": []
 }
 
+ai_background_state = {
+    "running": False,
+    "last_start": 0.0,
+}
+AI_BACKGROUND_COOLDOWN = 30
+AI_BACKGROUND_LOCK = threading.Lock()
+
 alert_cache = {}
 
 AI_REFRESH_TIME = 86400  # 24 timmar (sekunder)
+
+
+def ensure_ai_background_loading(strategy="short", risk="medium", capital=10000):
+    """Kick off a single background AI refresh when cache is empty."""
+    if ai_results_cache.get("data") or ai_cache.get("data"):
+        return False
+
+    now = time.time()
+    with AI_BACKGROUND_LOCK:
+        if ai_background_state["running"]:
+            return False
+        if now - float(ai_background_state.get("last_start", 0.0)) < AI_BACKGROUND_COOLDOWN:
+            return False
+
+        ai_background_state["running"] = True
+        ai_background_state["last_start"] = now
+
+    def _worker():
+        try:
+            safe_fetch(lambda: run_daily_ai(strategy, risk, capital))
+        finally:
+            with AI_BACKGROUND_LOCK:
+                ai_background_state["running"] = False
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return True
 
 # ===== MARKET =====
 def get_price_finnhub(symbol):
@@ -4326,6 +4359,7 @@ def dashboard():
         print("⚠️ AI-cache tom – visar snabb vy och laddar i bakgrunden")
         ranked = []
         ai_loading = True
+        ensure_ai_background_loading(ai_strategy, ai_risk, amount)
 
     # ✅ GLOBAL TOP
     top_global = [
@@ -4649,6 +4683,11 @@ def portfolio_page():
     if not ranked:
         print("⚠️ AI-cache tom i portfolio – använder snabb vy")
         ai_loading = True
+        ensure_ai_background_loading(
+            session.get("ai_strategy", "short"),
+            session.get("ai_risk", "medium"),
+            session.get("amount", 10000),
+        )
 
     if request.method == "POST":
         for s in ranked:

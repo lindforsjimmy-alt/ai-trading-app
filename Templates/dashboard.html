@@ -1180,7 +1180,7 @@
 
             const initialProgress = setPageLoadProgress(getSavedPageLoadProgress());
 
-            {% if ai_loading or quick_bootstrap %}
+            {% if (ai_loading or quick_bootstrap) and active_tab == 'dashboard' %}
             const refreshIntervalMs = 10000;
             let remaining = Math.floor(refreshIntervalMs / 1000);
             let elapsedMs = 0;
