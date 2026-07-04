@@ -4629,7 +4629,7 @@ def dashboard():
 
             if f"sell_{t}" in request.form:
                 qty = request.form.get(f"sellqty_{t}")
-                if qty and qty.isdigit():
+                if qty and qty.isdigit() and int(qty) > 0:
                     sell(user, t, int(qty))
                     return redirect("/dashboard?tab=portfolio")
 
@@ -4795,12 +4795,12 @@ def portfolio_page():
 
             if f"buy_{t}" in request.form:
                 qty = request.form.get(f"buyqty_{t}")
-                if qty and qty.isdigit():
+                if qty and qty.isdigit() and int(qty) > 0:
                     buy(user, t, int(qty), s["price"])
 
             if f"sell_{t}" in request.form:
                 qty = request.form.get(f"sellqty_{t}")
-                if qty and qty.isdigit():
+                if qty and qty.isdigit() and int(qty) > 0:
                     sell(user, t, int(qty))
 
     pf_strategy = request.form.get("pf_strategy") or session.get("pf_strategy", "short")
