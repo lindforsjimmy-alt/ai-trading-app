@@ -14,7 +14,6 @@ except:
     print("⚠️ dotenv not available (Render OK)")
 from datetime import timedelta, datetime
 import finnhub
-import pandas as pd
 import threading
 from sp500_list import SP500_SYMBOLS
 from trading import buy, sell
@@ -52,6 +51,18 @@ app.jinja_env.auto_reload = True
 
 ENABLE_BACKGROUND = os.environ.get("ENABLE_BACKGROUND", "false").lower() in ("1", "true", "yes")
 ALERT_LOG_FILE = os.environ.get("ALERT_LOG_FILE", "stock_data/alerts.log")
+IS_RENDER = os.environ.get("RENDER", "").strip().lower() in ("1", "true", "yes")
+LEAN_MODE = os.environ.get("LEAN_MODE", "1" if IS_RENDER else "0").strip().lower() in ("1", "true", "yes")
+
+# Starter-friendly caps to keep memory usage stable on Render.
+MARKET_SYMBOL_LIMIT = 40 if LEAN_MODE else 80
+SCAN_CANDIDATE_LIMIT = 80 if LEAN_MODE else 150
+COINGECKO_PAGES = 1 if LEAN_MODE else 4
+AI_CRYPTO_LIMIT = 12 if LEAN_MODE else 40
+MAX_NEWS_CACHE_ITEMS = 200 if LEAN_MODE else 1000
+MAX_COMPANY_CACHE_ITEMS = 400 if LEAN_MODE else 2000
+MAX_FUNDAMENTAL_CACHE_ITEMS = 200 if LEAN_MODE else 1000
+MAX_INDEX_HISTORY_CACHE_ITEMS = 24 if LEAN_MODE else 120
 
 FUNDAMENTAL_CACHE = {}
 FUNDAMENTAL_CACHE_TIME = 86400
@@ -187,6 +198,19 @@ def save_user_settings(email, updates):
 
         with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=True, indent=2, sort_keys=True)
+
+
+def trim_dict_cache(cache, max_items):
+    if max_items <= 0:
+        cache.clear()
+        return
+
+    while len(cache) > max_items:
+        try:
+            first_key = next(iter(cache))
+        except StopIteration:
+            return
+        cache.pop(first_key, None)
 
 
 def coerce_bool_setting(value, default=False):
@@ -768,6 +792,7 @@ def get_asset_display_name(symbol):
 
     if not company_name:
         COMPANY_NAME_CACHE[symbol] = None
+        trim_dict_cache(COMPANY_NAME_CACHE, MAX_COMPANY_CACHE_ITEMS)
         return None
 
     if symbol.upper() in company_name:
@@ -776,6 +801,7 @@ def get_asset_display_name(symbol):
         display_name = f"{company_name} ({symbol})"
 
     COMPANY_NAME_CACHE[symbol] = display_name
+    trim_dict_cache(COMPANY_NAME_CACHE, MAX_COMPANY_CACHE_ITEMS)
     return display_name
 
 
@@ -809,6 +835,7 @@ def get_fundamental_summary(symbol):
     })
 
     FUNDAMENTAL_CACHE[symbol] = (summary, now)
+    trim_dict_cache(FUNDAMENTAL_CACHE, MAX_FUNDAMENTAL_CACHE_ITEMS)
     return summary
 
 
@@ -844,6 +871,7 @@ def get_news_triggers(t):
                     triggers["score"] += 1
                     triggers["summary"].append(f"{kw} i nyhetsrubrik")
         news_cache[t] = (triggers, now)
+        trim_dict_cache(news_cache, MAX_NEWS_CACHE_ITEMS)
         return triggers
     except Exception as ex:
         logger.warning("News trigger fetch failed for %s: %s", t, ex)
@@ -938,7 +966,7 @@ def market_scanner():
 
         candidates.append(sym)
 
-    candidates = candidates[:150]
+    candidates = candidates[:SCAN_CANDIDATE_LIMIT]
 
     print(f"✅ Scanner hittade {len(candidates)} kandidater")
 
@@ -981,7 +1009,7 @@ def get_stock_assets(symbols):
 def get_crypto_assets():
     assets = []
 
-    for page in range(1, 5):
+    for page in range(1, COINGECKO_PAGES + 1):
         try:
             data = requests.get(
                 f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}"
@@ -1025,7 +1053,7 @@ def get_market_assets():
     symbols += [s["t"] for s in ai_cache.get("data", [])[:50]]
 
     symbols = list(set(symbols))
-    symbols = symbols[:80]  
+    symbols = symbols[:MARKET_SYMBOL_LIMIT]
 
     # ✅ HÄMTA DATA
     stock_assets = get_stock_assets(symbols)
@@ -1512,7 +1540,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
   
     symbols = market_scanner()
     assets = get_stock_assets(symbols)
-    assets += get_crypto_assets()[:40]  # begränsa cryp
+    assets += get_crypto_assets()[:AI_CRYPTO_LIMIT]
 
     if not assets:
         print("⚠️ No cache – using fallback market fetch")
@@ -2301,6 +2329,7 @@ def fetch_index_history(index_key, range_key):
         "ts": now,
         "data": clone_index_history_payload(payload),
     }
+    trim_dict_cache(INDEX_HISTORY_CACHE, MAX_INDEX_HISTORY_CACHE_ITEMS)
 
     return payload
 
