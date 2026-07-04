@@ -43,7 +43,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
 finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
 logger.info("FINNHUB KEY: %s", os.environ.get("FINNHUB_API_KEY"))
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="Templates")
 app.permanent_session_lifetime = timedelta(hours=12)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_trading_key_123")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
