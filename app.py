@@ -47,10 +47,28 @@ def _is_configured(name):
     return bool((os.environ.get(name) or "").strip())
 
 
+def _email_hint(value):
+    txt = (value or "").strip()
+    if not txt or "@" not in txt:
+        return "not-set"
+    local, domain = txt.split("@", 1)
+    if len(local) <= 2:
+        masked_local = "*" * len(local)
+    else:
+        masked_local = local[:2] + ("*" * (len(local) - 2))
+    return f"{masked_local}@{domain}"
+
+
 finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
 logger.info("Config status | FINNHUB_API_KEY configured: %s", _is_configured("FINNHUB_API_KEY"))
 logger.info("Config status | OPENAI_API_KEY configured: %s", _is_configured("OPENAI_API_KEY"))
 logger.info("Config status | DATABASE_URL configured: %s", _is_configured("DATABASE_URL"))
+logger.info(
+    "Config status | SMTP host=%s port=%s email_user=%s",
+    (os.environ.get("EMAIL_HOST") or os.environ.get("SMTP_HOST") or "smtp.office365.com").strip(),
+    (os.environ.get("EMAIL_PORT") or os.environ.get("SMTP_PORT") or "587").strip(),
+    _email_hint(os.environ.get("EMAIL_USER") or os.environ.get("SMTP_USER") or ""),
+)
 
 app = Flask(__name__, template_folder="Templates")
 app.permanent_session_lifetime = timedelta(hours=12)
@@ -3560,7 +3578,7 @@ def register_account():
     msg = ""
     msg_class = "msg-neutral"
     entered_email = ""
-    selected_known = list(DEFAULT_TRADING_PLATFORMS)
+    selected_known = []
     other_name = ""
 
     if request.method == "POST":
@@ -3611,7 +3629,7 @@ def register_account():
                 )
                 msg_class = "msg-warn"
             entered_email = ""
-            selected_known = list(DEFAULT_TRADING_PLATFORMS)
+            selected_known = []
             other_name = ""
 
     options_html = "".join(
@@ -4525,10 +4543,29 @@ def forgot():
 # ===== EMAIL/SYSTEM =====
 # ===== APPROVAL EMAIL =====
 
+def get_smtp_host():
+    return (os.environ.get("EMAIL_HOST") or os.environ.get("SMTP_HOST") or "smtp.office365.com").strip()
+
+
+def get_smtp_port():
+    raw_port = (os.environ.get("EMAIL_PORT") or os.environ.get("SMTP_PORT") or "587").strip()
+    try:
+        return int(raw_port)
+    except Exception:
+        return 587
+
+
+def get_email_user():
+    return (os.environ.get("EMAIL_USER") or os.environ.get("SMTP_USER") or "").strip()
+
+
+def get_email_password():
+    return (os.environ.get("EMAIL_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "").strip()
+
 def send_registration_received_email(user_email, base_url=None):
 
-    sender = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASSWORD")
+    sender = get_email_user()
+    password = get_email_password()
 
     if not sender or not password:
         logger.warning("Registration confirmation mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
@@ -4558,7 +4595,7 @@ BullEye AI
     msg["To"] = user_email
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
+        server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
@@ -4571,8 +4608,8 @@ BullEye AI
 
 def send_approval_email(new_user_email, base_url=None):
 
-    sender = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASSWORD")
+    sender = get_email_user()
+    password = get_email_password()
 
     if not sender or not password:
         logger.warning("Approval mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
@@ -4630,7 +4667,7 @@ Neka:
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
+        server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
@@ -4643,8 +4680,8 @@ Neka:
 
 
 def send_account_approved_email(user_email):
-    sender = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASSWORD")
+    sender = get_email_user()
+    password = get_email_password()
 
     if not sender or not password:
         logger.warning("Approval confirmation mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
@@ -4667,7 +4704,7 @@ Välkommen!
     msg["To"] = user_email
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
+        server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
@@ -4680,8 +4717,8 @@ Välkommen!
 
 # ===== ALERT FUNCTION =====
 def send_alert(email, message, alert_type="GENERAL"):
-    sender = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASSWORD")
+    sender = get_email_user()
+    password = get_email_password()
 
     if not sender or not password:
         logger.warning("Email not configured; alert not sent: %s", message)
@@ -4710,8 +4747,8 @@ def send_alert(email, message, alert_type="GENERAL"):
 # ===== RESET EMAIL =====
 def send_reset_email(email, new_password):
 
-    sender = os.environ.get("EMAIL_USER")
-    password = os.environ.get("EMAIL_PASSWORD")
+    sender = get_email_user()
+    password = get_email_password()
 
     if not sender or not password:
         logger.warning("Reset mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
