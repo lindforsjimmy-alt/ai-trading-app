@@ -105,6 +105,7 @@ MAX_NEWS_CACHE_ITEMS = 200 if LEAN_MODE else 1000
 MAX_COMPANY_CACHE_ITEMS = 400 if LEAN_MODE else 2000
 MAX_FUNDAMENTAL_CACHE_ITEMS = 200 if LEAN_MODE else 1000
 MAX_INDEX_HISTORY_CACHE_ITEMS = 24 if LEAN_MODE else 120
+NEWS_REQUEST_TIMEOUT = float(os.environ.get("NEWS_REQUEST_TIMEOUT", "3.5"))
 
 FUNDAMENTAL_CACHE = {}
 FUNDAMENTAL_CACHE_TIME = 86400
@@ -1543,6 +1544,36 @@ def enrich_with_fundamentals(assets):
     return assets
 
 
+def fetch_google_news_entries(query, limit=10):
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    try:
+        response = requests.get(
+            "https://news.google.com/rss/search",
+            params={
+                "q": q,
+                "hl": "en-US",
+                "gl": "US",
+                "ceid": "US:en",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/rss+xml, application/xml;q=0.9,*/*;q=0.8",
+            },
+            timeout=NEWS_REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        entries = getattr(feed, "entries", []) or []
+        return entries[:max(1, int(limit or 10))]
+    except Exception as ex:
+        logger.warning("Google News RSS fetch failed for %s: %s", q, ex)
+        return []
+
+
 def get_news_triggers(t):
     now = time.time()
 
@@ -1558,8 +1589,7 @@ def get_news_triggers(t):
     }
     keywords = ["launch", "announces", "partnership", "agreement", "funding", "acquisition", "expansion", "growth", "upgrade", "collaboration", "deal"]
     try:
-        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}")
-        entries = getattr(feed, "entries", [])
+        entries = fetch_google_news_entries(t, limit=10)
         for e in entries[:10]:
             txt = (e.title + " " + e.get("summary", "")).lower()
             for kw in keywords:
@@ -1607,8 +1637,7 @@ def get_news_sources(t, limit=5, allow_network=True):
     negative_keywords = ["down", "loss", "decline", "fall", "drop", "bear", "negative", "weak", "downgrade", "warning"]
     
     try:
-        feed = feedparser.parse(f"https://news.google.com/rss/search?q={t}")
-        entries = getattr(feed, "entries", [])
+        entries = fetch_google_news_entries(t, limit=limit)
         
         for e in entries[:limit]:
             title = e.get("title", "N/A")
@@ -2600,7 +2629,8 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         # ✅ indikatorer (MÅSTE KOMMA FÖRST)
         trend_score = get_trend_score_from_history(prices)
         rsi_score = get_rsi_score_from_history(prices)
-        news_score = get_news_score(s["t"])
+        # Keep daily AI scan stable: avoid live RSS network calls per symbol.
+        news_score = get_news_score(s["t"], allow_network=False)
         ma_score = get_ma_score(prices)
 
         # ✅ Justera vikter baserat på strategi
@@ -6144,17 +6174,23 @@ def dashboard():
     emergency_recommendations = False
 
     if not ranked:
-        print("⚠️ AI-cache tom – försöker direkt omkörning")
-        ranked = safe_fetch(lambda: run_daily_ai(ai_strategy, ai_risk, amount)) or []
-
-        if ranked:
-            print(f"✅ AI omkörning klar – laddade {len(ranked)} kandidater")
-        else:
-            print("⚠️ AI-scan gav inga kandidater – startar bakgrundsladdning + reservlista")
+        if quick_bootstrap:
+            print("⚠️ AI-cache tom – supersnabb vy aktiv, laddar i bakgrunden")
+            ranked = []
+            ai_loading = True
             ensure_ai_background_loading(ai_strategy, ai_risk, amount)
-            ranked = build_emergency_recommendations(max(top_n, 5))
-            emergency_recommendations = bool(ranked)
-            ai_loading = not emergency_recommendations
+        else:
+            print("⚠️ AI-cache tom – försöker direkt omkörning")
+            ranked = safe_fetch(lambda: run_daily_ai(ai_strategy, ai_risk, amount)) or []
+
+            if ranked:
+                print(f"✅ AI omkörning klar – laddade {len(ranked)} kandidater")
+            else:
+                print("⚠️ AI-scan gav inga kandidater – startar bakgrundsladdning + reservlista")
+                ensure_ai_background_loading(ai_strategy, ai_risk, amount)
+                ranked = build_emergency_recommendations(max(top_n, 5))
+                emergency_recommendations = bool(ranked)
+                ai_loading = not emergency_recommendations
 
     loss_blocked_tickers = get_loss_blocked_tickers(user) if block_loss_sells else set()
     ranked_for_recommendations = [s for s in ranked if s.get("t") not in loss_blocked_tickers]
