@@ -63,6 +63,8 @@ finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
 logger.info("Config status | FINNHUB_API_KEY configured: %s", _is_configured("FINNHUB_API_KEY"))
 logger.info("Config status | OPENAI_API_KEY configured: %s", _is_configured("OPENAI_API_KEY"))
 logger.info("Config status | DATABASE_URL configured: %s", _is_configured("DATABASE_URL"))
+logger.info("Config status | BREVO_API_KEY configured: %s", _is_configured("BREVO_API_KEY"))
+logger.info("Config status | BREVO_SENDER_EMAIL configured: %s", _is_configured("BREVO_SENDER_EMAIL"))
 logger.info(
     "Config status | SMTP host=%s port=%s email_user=%s",
     (os.environ.get("EMAIL_HOST") or os.environ.get("SMTP_HOST") or "smtp.office365.com").strip(),
@@ -4562,6 +4564,69 @@ def get_email_user():
 def get_email_password():
     return (os.environ.get("EMAIL_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "").strip()
 
+
+def get_brevo_api_key():
+    return (os.environ.get("BREVO_API_KEY") or "").strip()
+
+
+def get_brevo_sender_email():
+    return (os.environ.get("BREVO_SENDER_EMAIL") or "").strip()
+
+
+def get_brevo_sender_name():
+    return (os.environ.get("BREVO_SENDER_NAME") or "BullEye AI").strip()
+
+
+def send_mail_via_brevo_api(recipients, subject, text_body, html_body=None):
+    api_key = get_brevo_api_key()
+    sender_email = get_brevo_sender_email()
+    if not api_key or not sender_email:
+        return False, "BREVO_API_KEY/BREVO_SENDER_EMAIL saknas"
+
+    to_payload = []
+    for email in recipients:
+        target = (email or "").strip()
+        if target:
+            to_payload.append({"email": target})
+
+    if not to_payload:
+        return False, "Inga mottagare"
+
+    payload = {
+        "sender": {
+            "name": get_brevo_sender_name(),
+            "email": sender_email,
+        },
+        "to": to_payload,
+        "subject": subject,
+        "textContent": text_body,
+    }
+    if html_body:
+        payload["htmlContent"] = html_body
+
+    try:
+        res = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": api_key,
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+        if 200 <= res.status_code < 300:
+            return True, ""
+
+        detail = ""
+        try:
+            detail = str(res.json())
+        except Exception:
+            detail = (res.text or "").strip()
+        return False, f"Brevo API {res.status_code}: {detail[:240]}"
+    except Exception as ex:
+        return False, str(ex)
+
 def send_registration_received_email(user_email, base_url=None):
 
     sender = get_email_user()
@@ -4593,6 +4658,19 @@ BullEye AI
     msg["Subject"] = "BullEye AI - Vi har tagit emot din ansökan"
     msg["From"] = sender
     msg["To"] = user_email
+
+    # Prefer Brevo API when configured to avoid SMTP auth issues.
+    api_ok, api_err = send_mail_via_brevo_api(
+        [user_email],
+        "BullEye AI - Vi har tagit emot din ansökan",
+        body,
+        None,
+    )
+    if api_ok:
+        logger.info("REGISTRATION CONFIRMATION MAIL SENT TO: %s (Brevo API)", user_email)
+        return True, ""
+    if get_brevo_api_key():
+        logger.warning("Brevo API registration mail failed, fallback SMTP: %s", api_err)
 
     try:
         server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
@@ -4673,6 +4751,19 @@ Neka:
     msg.attach(MIMEText(text_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
+    # Prefer Brevo API when configured to avoid SMTP auth issues.
+    api_ok, api_err = send_mail_via_brevo_api(
+        recipients,
+        "Godkänn användare",
+        text_body,
+        html_body,
+    )
+    if api_ok:
+        logger.info("Approval email sent for %s to %s (Brevo API)", new_user_email, recipients)
+        return True, ""
+    if get_brevo_api_key():
+        logger.warning("Brevo API approval mail failed, fallback SMTP: %s", api_err)
+
     try:
         server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
         server.starttls()
@@ -4716,6 +4807,19 @@ Välkommen!
     msg["Subject"] = "BullEye AI - Konto godkänt"
     msg["From"] = sender
     msg["To"] = user_email
+
+    # Prefer Brevo API when configured to avoid SMTP auth issues.
+    api_ok, api_err = send_mail_via_brevo_api(
+        [user_email],
+        "BullEye AI - Konto godkänt",
+        body,
+        None,
+    )
+    if api_ok:
+        logger.info("ACCOUNT APPROVAL MAIL SENT TO: %s (Brevo API)", user_email)
+        return True, ""
+    if get_brevo_api_key():
+        logger.warning("Brevo API approval confirmation mail failed, fallback SMTP: %s", api_err)
 
     try:
         server = smtplib.SMTP(get_smtp_host(), get_smtp_port(), timeout=20)
