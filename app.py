@@ -4603,7 +4603,14 @@ BullEye AI
         logger.info("REGISTRATION CONFIRMATION MAIL SENT TO: %s", user_email)
         return True, ""
     except Exception as ex:
-        logger.error("Registration confirmation mail error for %s: %s", user_email, ex)
+        logger.error(
+            "Registration confirmation mail error for %s via %s:%s user=%s: %s",
+            user_email,
+            get_smtp_host(),
+            get_smtp_port(),
+            _email_hint(get_email_user()),
+            ex,
+        )
         return False, str(ex)
 
 def send_approval_email(new_user_email, base_url=None):
@@ -4675,7 +4682,14 @@ Neka:
         logger.info("Approval email sent for %s to %s", new_user_email, recipients)
         return True, ""
     except Exception as e:
-        logger.error("Approval mail error for %s: %s", new_user_email, e)
+        logger.error(
+            "Approval mail error for %s via %s:%s user=%s: %s",
+            new_user_email,
+            get_smtp_host(),
+            get_smtp_port(),
+            _email_hint(get_email_user()),
+            e,
+        )
         return False, str(e)
 
 
@@ -4712,7 +4726,14 @@ Välkommen!
         logger.info("ACCOUNT APPROVAL MAIL SENT TO: %s", user_email)
         return True, ""
     except Exception as ex:
-        logger.error("Account approval mail error for %s: %s", user_email, ex)
+        logger.error(
+            "Account approval mail error for %s via %s:%s user=%s: %s",
+            user_email,
+            get_smtp_host(),
+            get_smtp_port(),
+            _email_hint(get_email_user()),
+            ex,
+        )
         return False, str(ex)
 
 # ===== ALERT FUNCTION =====
@@ -4739,7 +4760,14 @@ def send_alert(email, message, alert_type="GENERAL"):
         server.quit()
         logger.info("ALERT SENT to %s: %s", email, message)
     except Exception as ex:
-        logger.error("Alert error for %s: %s", email, ex)
+        logger.error(
+            "Alert error for %s via %s:%s user=%s: %s",
+            email,
+            get_smtp_host(),
+            get_smtp_port(),
+            _email_hint(get_email_user()),
+            ex,
+        )
         with open(ALERT_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {email} {alert_type} FAILED {message} {ex}\n")
         return
@@ -4779,7 +4807,14 @@ Logga in och byt lösenord direkt efter inloggning.
         logger.info("RESET MAIL SENT TO: %s", email)
         return True, ""
     except Exception as e:
-        logger.error("Reset mail error for %s: %s", email, e)
+        logger.error(
+            "Reset mail error for %s via %s:%s user=%s: %s",
+            email,
+            get_smtp_host(),
+            get_smtp_port(),
+            _email_hint(get_email_user()),
+            e,
+        )
         return False, f"Kunde inte skicka email: {e}"
 
 # ===== UI HELPERS =====
