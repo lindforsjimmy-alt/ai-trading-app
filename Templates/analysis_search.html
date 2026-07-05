@@ -262,6 +262,40 @@
             margin-top: 6px;
         }
 
+        .currency-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .capital-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .currency-control label {
+            color: var(--muted);
+            font-size: 0.92rem;
+            font-weight: 700;
+        }
+
+        .capital-control label {
+            color: var(--muted);
+            font-size: 0.92rem;
+            font-weight: 700;
+        }
+
+        .currency-select {
+            min-width: 160px;
+        }
+
+        .capital-input {
+            min-width: 160px;
+        }
+
         .primary-btn {
             border: none;
             border-radius: 999px;
@@ -287,6 +321,32 @@
         .results {
             display: grid;
             gap: 14px;
+        }
+
+        .analysis-summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .summary-box {
+            padding: 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(103, 215, 255, 0.16);
+            background: rgba(103, 215, 255, 0.08);
+        }
+
+        .summary-label {
+            display: block;
+            color: var(--muted);
+            font-size: 0.82rem;
+            margin-bottom: 4px;
+        }
+
+        .summary-value {
+            font-size: 1rem;
+            font-weight: 800;
         }
 
         .result-card {
@@ -348,7 +408,7 @@
 
         .result-meta {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
             margin-bottom: 14px;
         }
@@ -478,6 +538,7 @@
 
             .search-row,
             .result-meta,
+            .analysis-summary,
             .trade-row {
                 grid-template-columns: 1fr;
             }
@@ -549,7 +610,7 @@
                 <div class="section-title">
                     <div>
                         <h2>Manuell sökrad</h2>
-                        <p>Välj önskad riktning per rad och kör en samlad analys.</p>
+                        <p>Välj vad du funderar på per rad och kör en samlad analys.</p>
                     </div>
                     <p>{{ filled_rows }} av {{ row_count }} rader ifyllda</p>
                 </div>
@@ -574,9 +635,23 @@
                     </div>
 
                     <div class="form-footer">
+                        <div class="capital-control">
+                            <label for="analysis-capital">Kapital</label>
+                            <input class="capital-input" id="analysis-capital" name="analysis_capital" type="number"
+                                min="0" step="0.01" value="{{ analysis_capital }}" placeholder="Ange kapital">
+                        </div>
+                        <div class="currency-control">
+                            <label for="analysis-currency">Visningsvaluta</label>
+                            <select class="currency-select" id="analysis-currency" name="analysis_currency">
+                                <option value="SEK" {% if analysis_currency=='SEK' %}selected{% endif %}>SEK</option>
+                                <option value="USD" {% if analysis_currency=='USD' %}selected{% endif %}>USD</option>
+                                <option value="EUR" {% if analysis_currency=='EUR' %}selected{% endif %}>EUR</option>
+                            </select>
+                        </div>
                         <button class="primary-btn" type="submit" id="analysis-search-button">Analysera igen</button>
                         <div class="helper-text">Tips: använd t.ex. AAPL, NVDA, Tesla eller Berkshire Hathaway. Du kan
-                            lämna tomma rader om du bara vill analysera några få.</div>
+                            lämna tomma rader om du bara vill analysera några få. Kapital anges i vald visningsvaluta.
+                        </div>
                     </div>
                 </form>
             </section>
@@ -596,6 +671,21 @@
 
                 <div id="analysis-results" class="results">
                     {% if submitted %}
+                    <div class="analysis-summary">
+                        <div class="summary-box">
+                            <span class="summary-label">Totalt rekommenderade antal</span>
+                            <span class="summary-value">{{ analysis_summary.total_recommended_qty }}</span>
+                        </div>
+                        <div class="summary-box">
+                            <span class="summary-label">Totalt rekommenderat</span>
+                            <span class="summary-value">{{ analysis_summary.total_recommended_display }} {{
+                                analysis_summary.currency }}</span>
+                        </div>
+                        <div class="summary-box">
+                            <span class="summary-label">Motsvarande i SEK</span>
+                            <span class="summary-value">{{ analysis_summary.total_recommended_sek }} SEK</span>
+                        </div>
+                    </div>
                     {% for row in analysis_rows %}
                     {% if row.status and row.status != 'empty' %}
                     <article class="result-card">
@@ -640,6 +730,10 @@
                                 <span class="meta-label">AI-antal</span>
                                 <span class="meta-value">{{ row.recommended_qty }}</span>
                             </div>
+                            <div class="meta-box">
+                                <span class="meta-label">Pris/st {{ analysis_summary.currency }}</span>
+                                <span class="meta-value">{{ row.price_display }}</span>
+                            </div>
                         </div>
 
                         <div class="analysis-block">
@@ -656,8 +750,9 @@
                                 <button class="row-buy-button buy-row-button" type="button"
                                     data-row-index="{{ row.index }}">Köp</button>
                             </div>
-                            <p class="trade-hint">AI rekommenderar {{ row.recommended_qty }} st. Du kan skriva över
-                                antalet innan du köper.</p>
+                            <p class="trade-hint">AI rekommenderar {{ row.recommended_qty }} st. Totalt: {{
+                                row.recommended_total_cost_display }} {{ analysis_summary.currency }} (≈ {{
+                                row.recommended_total_cost_sek }} SEK). Du kan skriva över antalet innan du köper.</p>
                         </div>
                         {% else %}
                         <div class="status-box {% if row.status == 'not_found' %}bad{% endif %}">
@@ -684,6 +779,8 @@
         const analysisButton = document.getElementById('analysis-search-button');
         const analysisResults = document.getElementById('analysis-results');
         const buyAllButton = document.getElementById('buy-all-button');
+        const currencySelect = document.getElementById('analysis-currency');
+        const capitalInput = document.getElementById('analysis-capital');
 
         function escapeHtml(value) {
             return String(value ?? '')
@@ -704,7 +801,22 @@
             }
         }
 
-        function renderRows(rows) {
+        function formatMoney(value) {
+            const amount = Number(value || 0);
+            return new Intl.NumberFormat('sv-SE', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            }).format(amount);
+        }
+
+        function formatCount(value) {
+            const amount = Number(value || 0);
+            return new Intl.NumberFormat('sv-SE', {
+                maximumFractionDigits: 0,
+            }).format(amount);
+        }
+
+        function renderRows(rows, summary) {
             if (!analysisResults) {
                 return;
             }
@@ -722,6 +834,30 @@
                 return;
             }
 
+            const summaryData = summary || {
+                currency: currencySelect ? currencySelect.value : 'SEK',
+                total_recommended_qty: 0,
+                total_recommended_display: 0,
+                total_recommended_sek: 0,
+            };
+            const summaryCurrency = summaryData.currency || 'SEK';
+            const summaryMarkup = `
+                <div class="analysis-summary">
+                    <div class="summary-box">
+                        <span class="summary-label">Totalt rekommenderade antal</span>
+                        <span class="summary-value">${formatCount(summaryData.total_recommended_qty)}</span>
+                    </div>
+                    <div class="summary-box">
+                        <span class="summary-label">Totalt rekommenderat</span>
+                        <span class="summary-value">${formatMoney(summaryData.total_recommended_display)} ${summaryCurrency}</span>
+                    </div>
+                    <div class="summary-box">
+                        <span class="summary-label">Motsvarande i SEK</span>
+                        <span class="summary-value">${formatMoney(summaryData.total_recommended_sek)} SEK</span>
+                    </div>
+                </div>
+            `;
+
             const cards = renderableRows.map((row) => {
                 const title = escapeHtml(row.display_name || row.query || 'Okänt');
                 const requestedAction = escapeHtml(row.requested_action || 'Funderar på att köpa');
@@ -732,13 +868,15 @@
                     const alignment = escapeHtml(row.alignment || '');
                     const analysisHtml = row.analysis_html || '';
                     const signal = escapeHtml(row.signal || '');
-                    const price = Number(row.price || 0).toFixed(2);
+                    const price = formatMoney(row.price_display ?? row.price ?? 0);
                     const score = escapeHtml(row.score ?? '');
                     const symbol = escapeHtml(row.symbol || '');
                     const newsScore = escapeHtml(row.news_score ?? '');
                     const recommendedAction = escapeHtml(row.recommended_action || '');
                     const recommendedQty = Number(row.recommended_qty || 0);
                     const buyQty = recommendedQty > 0 ? recommendedQty : '';
+                    const totalDisplay = formatMoney(row.recommended_total_cost_display ?? 0);
+                    const totalSek = formatMoney(row.recommended_total_cost_sek ?? 0);
 
                     return `
                         <article class="result-card">
@@ -774,7 +912,11 @@
                                 </div>
                                 <div class="meta-box">
                                     <span class="meta-label">AI-antal</span>
-                                    <span class="meta-value">${recommendedQty}</span>
+                                    <span class="meta-value">${formatCount(recommendedQty)}</span>
+                                </div>
+                                <div class="meta-box">
+                                    <span class="meta-label">Pris/st ${summaryCurrency}</span>
+                                    <span class="meta-value">${price}</span>
                                 </div>
                             </div>
 
@@ -789,7 +931,7 @@
                                     <input class="trade-input" type="number" min="1" step="1" name="buyqty_${row.index}" value="${buyQty}" placeholder="Ange antal" aria-label="Antal att köpa för rad ${row.index}">
                                     <button class="row-buy-button buy-row-button" type="button" data-row-index="${row.index}">Köp</button>
                                 </div>
-                                <p class="trade-hint">AI rekommenderar ${recommendedQty} st. Du kan skriva över antalet innan du köper.</p>
+                                <p class="trade-hint">AI rekommenderar ${formatCount(recommendedQty)} st. Totalt: ${totalDisplay} ${summaryCurrency} (≈ ${totalSek} SEK). Du kan skriva över antalet innan du köper.</p>
                             </div>
                         </article>
                     `;
@@ -814,7 +956,7 @@
                 `;
             }).join('');
 
-            analysisResults.innerHTML = cards;
+            analysisResults.innerHTML = summaryMarkup + cards;
             setBuyAllState(hasBuyableRows(renderableRows));
         }
 
@@ -824,6 +966,12 @@
                 analysisResults.querySelectorAll('input[name^="buyqty_"]').forEach((input) => {
                     formData.set(input.name, input.value);
                 });
+            }
+            if (capitalInput) {
+                formData.set('analysis_capital', capitalInput.value);
+            }
+            if (currencySelect) {
+                formData.set('analysis_currency', currencySelect.value);
             }
             return formData;
         }
@@ -893,7 +1041,7 @@
                         throw new Error(payload.message || 'Analysen kunde inte köras just nu.');
                     }
 
-                    renderRows(payload.analysis_rows || []);
+                    renderRows(payload.analysis_rows || [], payload.analysis_summary || null);
                 } catch (error) {
                     if (analysisResults) {
                         analysisResults.innerHTML = `<div class="status-box bad">${escapeHtml(error.message || 'Något gick fel.')}</div>`;

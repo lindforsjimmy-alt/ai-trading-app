@@ -1763,6 +1763,10 @@ def resolve_analysis_symbol(raw_query):
         if lower_query == symbol.lower() or lower_query in display_name.lower() or query_key in display_key:
             return symbol
 
+    yahoo_symbol = search_yahoo_analysis_symbol(query)
+    if yahoo_symbol:
+        return yahoo_symbol
+
     return None
 
 
@@ -1779,6 +1783,57 @@ def extract_close_prices(hist_data):
         return []
 
     return [float(price) for price in prices if isinstance(price, (int, float)) and price > 0]
+
+
+def search_yahoo_analysis_symbol(query):
+    raw_query = (query or "").strip()
+    if not raw_query:
+        return None
+
+    try:
+        response = requests.get(
+            "https://query1.finance.yahoo.com/v1/finance/search",
+            params={
+                "q": raw_query,
+                "quotesCount": 10,
+                "newsCount": 0,
+                "lang": "en-US",
+                "region": "US",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+                "Referer": "https://finance.yahoo.com/",
+            },
+            timeout=6,
+        )
+        if response.status_code != 200:
+            return None
+
+        payload = response.json() or {}
+        quotes = payload.get("quotes", []) or []
+        normalized_query = _analysis_key(raw_query)
+        fallback_symbol = None
+
+        for quote in quotes:
+            symbol = (quote.get("symbol") or "").strip()
+            if not symbol:
+                continue
+
+            long_name = (quote.get("longname") or quote.get("shortname") or quote.get("name") or "").strip()
+            quote_type = (quote.get("quoteType") or "").strip().lower()
+            exchange = (quote.get("exchange") or "").strip().lower()
+            if _analysis_key(symbol) == normalized_query:
+                return symbol
+            if normalized_query and normalized_query in _analysis_key(long_name):
+                return symbol
+            if fallback_symbol is None and quote_type in {"equity", "etf"} and exchange not in {"", "pnk"}:
+                fallback_symbol = symbol
+
+        return fallback_symbol
+    except Exception as ex:
+        logger.debug("Yahoo search fallback failed for %s: %s", raw_query, ex)
+        return None
 
 
 def get_analysis_intent_meta(raw_action):
@@ -1923,12 +1978,11 @@ def build_manual_analysis_row(raw_query, requested_action):
     }
 
 
-def apply_manual_analysis_buy_plan(analysis_rows):
+def apply_manual_analysis_buy_plan(analysis_rows, capital_amount_value, capital_currency):
     fx_rates = get_usd_fx_rates()
     usd_sek_rate = float(fx_rates.get("SEK", 10.5))
     usd_eur_rate = float(fx_rates.get("EUR", 0.92))
-    capital_amount = parse_capital_amount(session.get("amount"), 10000)
-    capital_currency = (session.get("capital_currency") or "SEK").upper()
+    capital_amount = parse_capital_amount(capital_amount_value, 10000)
     risk_profile = (session.get("ai_risk") or "medium").lower()
 
     total_capital_usd = convert_capital_to_usd(
@@ -1951,6 +2005,46 @@ def apply_manual_analysis_buy_plan(analysis_rows):
 
     enrich_with_buy_plan(buy_candidates, total_capital_usd, usd_sek_rate, risk_profile)
     return analysis_rows
+
+
+def build_analysis_cost_summary(analysis_rows, display_currency, usd_sek_rate, usd_eur_rate):
+    ccy = (display_currency or "SEK").upper()
+    if ccy not in {"SEK", "USD", "EUR"}:
+        ccy = "SEK"
+
+    total_recommended_qty = 0
+    total_recommended_usd = 0.0
+
+    for row in analysis_rows:
+        if row.get("status") != "ok":
+            continue
+
+        qty = int(row.get("recommended_qty") or 0)
+        price = float(row.get("price") or 0)
+        total_usd = round(qty * price, 2)
+        total_display = round(convert_usd_to_currency(total_usd, ccy, usd_sek_rate, usd_eur_rate), 2)
+        total_sek = round(convert_usd_to_currency(total_usd, "SEK", usd_sek_rate, usd_eur_rate), 2)
+
+        row["recommended_total_cost_usd"] = total_usd
+        row["recommended_total_cost_display"] = total_display
+        row["recommended_total_cost_sek"] = total_sek
+        row["recommended_total_cost_currency"] = ccy
+        row["price_display"] = round(convert_usd_to_currency(price, ccy, usd_sek_rate, usd_eur_rate), 2)
+        row["price_sek"] = round(convert_usd_to_currency(price, "SEK", usd_sek_rate, usd_eur_rate), 2)
+
+        total_recommended_qty += qty
+        total_recommended_usd += total_usd
+
+    total_display = round(convert_usd_to_currency(total_recommended_usd, ccy, usd_sek_rate, usd_eur_rate), 2)
+    total_sek = round(convert_usd_to_currency(total_recommended_usd, "SEK", usd_sek_rate, usd_eur_rate), 2)
+
+    return {
+        "currency": ccy,
+        "total_recommended_qty": total_recommended_qty,
+        "total_recommended_usd": round(total_recommended_usd, 2),
+        "total_recommended_display": total_display,
+        "total_recommended_sek": total_sek,
+    }
 
 # ✅ HUVUDFUNKTION (ERSÄTTER DIN GAMLA)
 def get_market_assets():
@@ -6593,6 +6687,14 @@ def analysis_search():
     is_admin = is_admin_email(user)
     user_platforms = get_user_trading_platforms(user)
     platform_names = build_platform_names_for_header(user_platforms)
+    fx_rates = get_usd_fx_rates()
+    usd_sek_rate = float(fx_rates.get("SEK", 10.5))
+    usd_eur_rate = float(fx_rates.get("EUR", 0.92))
+
+    display_currency = (request.form.get("analysis_currency") or session.get("analysis_currency") or "SEK").upper()
+    if display_currency not in {"SEK", "USD", "EUR"}:
+        display_currency = "SEK"
+    session["analysis_currency"] = display_currency
 
     row_count = 8
     analysis_rows = []
@@ -6603,7 +6705,13 @@ def analysis_search():
         result["index"] = idx
         analysis_rows.append(result)
 
-    apply_manual_analysis_buy_plan(analysis_rows)
+    capital_amount_value = request.form.get("analysis_capital") if request.method == "POST" else None
+    if not capital_amount_value:
+        capital_amount_value = session.get("analysis_capital", session.get("amount", 10000))
+    session["analysis_capital"] = parse_capital_amount(capital_amount_value, 10000)
+
+    apply_manual_analysis_buy_plan(analysis_rows, session["analysis_capital"], display_currency)
+    analysis_summary = build_analysis_cost_summary(analysis_rows, display_currency, usd_sek_rate, usd_eur_rate)
 
     submitted = request.method == "POST"
     filled_rows = sum(1 for row in analysis_rows if row.get("status") not in {"empty"})
@@ -6655,6 +6763,7 @@ def analysis_search():
             "bought": bought,
             "redirect_url": "/dashboard?tab=portfolio",
             "message": "Köpet har registrerats och ligger nu i portfolio.",
+            "analysis_currency": display_currency,
         }
 
         if request.headers.get("X-Requested-With") == "analysis-search":
@@ -6669,6 +6778,8 @@ def analysis_search():
                 "filled_rows": filled_rows,
                 "row_count": row_count,
                 "analysis_rows": analysis_rows,
+                "analysis_summary": analysis_summary,
+                "analysis_currency": display_currency,
             }
         )
 
@@ -6681,6 +6792,10 @@ def analysis_search():
         row_count=row_count,
         submitted=submitted,
         filled_rows=filled_rows,
+        analysis_summary=analysis_summary,
+        analysis_currency=display_currency,
+        analysis_capital=session["analysis_capital"],
+        usd_sek_rate=usd_sek_rate,
         active_page="analysis_search",
     )
 
