@@ -2,6 +2,7 @@
 # Kommentarer på svenska enligt projektregler
 
 import os
+from datetime import datetime
 
 try:
     import psycopg
@@ -20,6 +21,10 @@ def db_enabled():
 
 def db_connect():
     return psycopg.connect(DATABASE_URL)
+
+
+def _fallback_sold_trades_file():
+    return "stock_data/sold_trades.txt"
 
 
 def get_user_id(email):
@@ -142,17 +147,81 @@ def buy(user, t, qty, price_val):
         f.write(f"{user}|{t}|{qty}|{price_val}\n")
 
 
-def sell(user, t, qty):
-    """Utför en enkel sell genom att uppdatera poster i trades-filen."""
+def _record_sale_event(user, t, sold_qty, avg_buy_price, sell_price):
+    if sold_qty <= 0 or sell_price <= 0:
+        return
+
+    ticker = str(t).upper()
+    avg_buy_price = float(avg_buy_price or 0)
+    sell_price = float(sell_price or 0)
+    realized_pnl_pct = 0.0
+    if avg_buy_price > 0:
+        realized_pnl_pct = ((sell_price - avg_buy_price) / avg_buy_price) * 100.0
+    sold_with_loss = realized_pnl_pct < 0
+
     if db_enabled():
         user_id = get_user_id(user)
         if user_id is not None:
-            remaining = int(float(qty))
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO trade_sales (
+                            user_id, ticker, qty, avg_buy_price, sell_price, realized_pnl_pct, sold_with_loss
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            user_id,
+                            ticker,
+                            float(sold_qty),
+                            avg_buy_price,
+                            sell_price,
+                            realized_pnl_pct,
+                            sold_with_loss,
+                        ),
+                    )
+                conn.commit()
+            return
+
+    try:
+        with open(_fallback_sold_trades_file(), "a", encoding="utf-8") as f:
+            f.write(
+                f"{(user or '').strip().lower()}|{ticker}|{float(sold_qty)}|{avg_buy_price}|{sell_price}|{realized_pnl_pct}|{int(sold_with_loss)}|{datetime.utcnow().isoformat()}\n"
+            )
+    except Exception:
+        pass
+
+
+def sell(user, t, qty, price_val=None):
+    """Utför en enkel sell genom att uppdatera poster i trades-filen."""
+    sell_price = float(price_val or 0)
+    if sell_price <= 0:
+        sell_price = float(price(t) or 0)
+    requested_qty = int(float(qty))
+
+    if db_enabled():
+        user_id = get_user_id(user)
+        if user_id is not None:
+            remaining = requested_qty
             if remaining <= 0:
                 return
 
             with db_connect() as conn:
                 with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COALESCE(SUM(qty), 0), COALESCE(SUM(qty * price), 0)
+                        FROM trades
+                        WHERE user_id = %s AND ticker = %s AND side = 'BUY'
+                        """,
+                        (user_id, str(t).upper()),
+                    )
+                    basis_row = cur.fetchone() or (0, 0)
+                    held_qty = int(float(basis_row[0] or 0))
+                    held_cost = float(basis_row[1] or 0)
+                    avg_buy_price = (held_cost / held_qty) if held_qty > 0 else 0
+
                     cur.execute(
                         """
                         SELECT id, qty
@@ -178,25 +247,44 @@ def sell(user, t, qty):
                             )
                             remaining = 0
                 conn.commit()
+            sold_qty = requested_qty - remaining
+            if sold_qty > 0:
+                _record_sale_event(user, t, sold_qty, avg_buy_price, sell_price)
             return
 
     lines = open(FILE).readlines()
     new = []
+    held_qty = 0
+    held_cost = 0.0
+    remaining = requested_qty
     for l in lines:
         parts = l.strip().split("|")
         if len(parts) < 4:
             continue
         u, ticker, q, p = parts
         q = int(float(q))
+        p = float(p)
 
         if u == user and ticker == t:
-            new_q = q - int(qty)
+            held_qty += q
+            held_cost += q * p
+
+        if u == user and ticker == t and remaining > 0:
+            new_q = q - remaining
             if new_q > 0:
                 new.append(f"{u}|{ticker}|{new_q}|{p}\n")
+                remaining = 0
+            else:
+                remaining -= q
         else:
             new.append(l)
 
     open(FILE, "w").writelines(new)
+
+    sold_qty = requested_qty - max(0, remaining)
+    avg_buy_price = (held_cost / held_qty) if held_qty > 0 else 0
+    if sold_qty > 0:
+        _record_sale_event(user, t, sold_qty, avg_buy_price, sell_price)
 
 
 def handle(cmd):

@@ -101,6 +101,7 @@ def upsert_settings(cur, user_id, settings):
     priority = str(settings.get("priority", "mix"))
     send_buy_alerts = bool(settings.get("send_buy_alerts", False))
     send_sell_alerts = bool(settings.get("send_sell_alerts", False))
+    block_loss_sells = bool(settings.get("block_loss_sells", False))
     pf_strategy = str(settings.get("pf_strategy", "short"))
     pf_risk = str(settings.get("pf_risk", "medium"))
 
@@ -117,13 +118,13 @@ def upsert_settings(cur, user_id, settings):
         """
         INSERT INTO user_settings (
             user_id, amount, capital_currency, ai_strategy, ai_risk, top_n, priority,
-            send_buy_alerts, send_sell_alerts, pf_strategy, pf_risk,
+            send_buy_alerts, send_sell_alerts, block_loss_sells, pf_strategy, pf_risk,
             mintrend_index_total, mintrend_index_recent, mintrend_index_pl, mintrend_index_range,
             mintrend_range, mintrend_currency, updated_at
         )
         VALUES (
             %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, NOW()
         )
@@ -148,7 +149,7 @@ def upsert_settings(cur, user_id, settings):
         """,
         (
             user_id, amount, currency, ai_strategy, ai_risk, top_n, priority,
-            send_buy_alerts, send_sell_alerts, pf_strategy, pf_risk,
+            send_buy_alerts, send_sell_alerts, block_loss_sells, pf_strategy, pf_risk,
             mintrend_index_total, mintrend_index_recent, mintrend_index_pl, mintrend_index_range,
             mintrend_range, mintrend_currency,
         ),

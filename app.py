@@ -3,6 +3,7 @@
 # ===== IMPORTS =====
 import builtins as _builtins
 import json
+import re
 
 from flask import Flask, redirect, session, request, render_template, send_file, jsonify
 import os, requests, time, feedparser, math, hashlib, logging, secrets, string
@@ -123,6 +124,7 @@ USERS_FILE = "stock_data/users.txt"
 ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
 USER_SETTINGS_FILE = "stock_data/user_settings.json"
+SOLD_TRADES_FILE = "stock_data/sold_trades.txt"
 USER_SETTINGS_LOCK = threading.Lock()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
@@ -297,6 +299,7 @@ def db_load_settings(email):
                         s.priority,
                         s.send_buy_alerts,
                         s.send_sell_alerts,
+                        s.block_loss_sells,
                         s.pf_strategy,
                         s.pf_risk,
                         s.mintrend_index_total,
@@ -324,14 +327,15 @@ def db_load_settings(email):
             "priority": row[5],
             "send_buy_alerts": bool(row[6]),
             "send_sell_alerts": bool(row[7]),
-            "pf_strategy": row[8],
-            "pf_risk": row[9],
-            "mintrend_index_total": row[10],
-            "mintrend_index_recent": row[11],
-            "mintrend_index_pl": row[12],
-            "mintrend_index_range": row[13],
-            "mintrend_range": row[14],
-            "mintrend_currency": row[15],
+            "block_loss_sells": bool(row[8]),
+            "pf_strategy": row[9],
+            "pf_risk": row[10],
+            "mintrend_index_total": row[11],
+            "mintrend_index_recent": row[12],
+            "mintrend_index_pl": row[13],
+            "mintrend_index_range": row[14],
+            "mintrend_range": row[15],
+            "mintrend_currency": row[16],
         }
     except Exception as ex:
         logger.warning("DB load settings failed for %s: %s", target, ex)
@@ -354,6 +358,7 @@ def db_save_settings(email, updates):
         "priority": "mix",
         "send_buy_alerts": False,
         "send_sell_alerts": False,
+        "block_loss_sells": False,
         "pf_strategy": "short",
         "pf_risk": "medium",
         "mintrend_index_total": "STANDARD",
@@ -388,13 +393,13 @@ def db_save_settings(email, updates):
                     """
                     INSERT INTO user_settings (
                         user_id, amount, capital_currency, ai_strategy, ai_risk, top_n, priority,
-                        send_buy_alerts, send_sell_alerts, pf_strategy, pf_risk,
+                        send_buy_alerts, send_sell_alerts, block_loss_sells, pf_strategy, pf_risk,
                         mintrend_index_total, mintrend_index_recent, mintrend_index_pl, mintrend_index_range,
                         mintrend_range, mintrend_currency, updated_at
                     )
                     VALUES (
                         %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, NOW()
                     )
@@ -407,6 +412,7 @@ def db_save_settings(email, updates):
                         priority = EXCLUDED.priority,
                         send_buy_alerts = EXCLUDED.send_buy_alerts,
                         send_sell_alerts = EXCLUDED.send_sell_alerts,
+                        block_loss_sells = EXCLUDED.block_loss_sells,
                         pf_strategy = EXCLUDED.pf_strategy,
                         pf_risk = EXCLUDED.pf_risk,
                         mintrend_index_total = EXCLUDED.mintrend_index_total,
@@ -427,6 +433,7 @@ def db_save_settings(email, updates):
                         str(merged.get("priority", "mix")),
                         bool(merged.get("send_buy_alerts", False)),
                         bool(merged.get("send_sell_alerts", False)),
+                        bool(merged.get("block_loss_sells", False)),
                         str(merged.get("pf_strategy", "short")),
                         str(merged.get("pf_risk", "medium")),
                         str(merged.get("mintrend_index_total", "STANDARD")).upper(),
@@ -442,6 +449,94 @@ def db_save_settings(email, updates):
     except Exception as ex:
         logger.warning("DB save settings failed for %s: %s", target, ex)
         return False
+
+
+def ensure_runtime_schema():
+    if not db_enabled():
+        return
+
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    ALTER TABLE user_settings
+                    ADD COLUMN IF NOT EXISTS block_loss_sells BOOLEAN NOT NULL DEFAULT FALSE
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS trade_sales (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        ticker TEXT NOT NULL,
+                        qty NUMERIC(20,8) NOT NULL CHECK (qty > 0),
+                        avg_buy_price NUMERIC(20,8) NOT NULL CHECK (avg_buy_price >= 0),
+                        sell_price NUMERIC(20,8) NOT NULL CHECK (sell_price >= 0),
+                        realized_pnl_pct NUMERIC(12,4) NOT NULL,
+                        sold_with_loss BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_trade_sales_user_ticker ON trade_sales (user_id, ticker)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_trade_sales_user_loss ON trade_sales (user_id, sold_with_loss)"
+                )
+            conn.commit()
+    except Exception as ex:
+        logger.warning("DB runtime schema ensure failed: %s", ex)
+
+
+def _truthy_text(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def get_loss_blocked_tickers(email):
+    target = (email or "").strip().lower()
+    blocked = set()
+
+    if db_enabled() and target:
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT ts.ticker
+                        FROM trade_sales ts
+                        JOIN users u ON u.id = ts.user_id
+                        WHERE LOWER(u.email) = LOWER(%s)
+                          AND ts.sold_with_loss = TRUE
+                        """,
+                        (target,),
+                    )
+                    for row in cur.fetchall():
+                        ticker = (row[0] or "").strip().upper()
+                        if ticker:
+                            blocked.add(ticker)
+        except Exception as ex:
+            logger.warning("DB loss-block lookup failed for %s: %s", target, ex)
+
+    try:
+        with open(SOLD_TRADES_FILE, encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split("|")
+                if len(parts) < 7:
+                    continue
+                file_user = (parts[0] or "").strip().lower()
+                ticker = (parts[1] or "").strip().upper()
+                sold_with_loss = _truthy_text(parts[6])
+                if ticker and sold_with_loss and file_user == target:
+                    blocked.add(ticker)
+    except Exception:
+        pass
+
+    return blocked
+
+
+ensure_runtime_schema()
 
 MIN_TREND_INDEX_OPTIONS = {
     "OMX": {"symbol": "^OMX", "name": "OMX Stockholm"},
@@ -509,6 +604,7 @@ os.makedirs("stock_data", exist_ok=True)
 open(DATA_FILE, "a").close()
 open(USERS_FILE, "a").close()
 open(ADMINS_FILE, "a").close()
+open(SOLD_TRADES_FILE, "a").close()
 if not os.path.exists(USER_SETTINGS_FILE):
     with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump({}, f)
@@ -1638,6 +1734,194 @@ def get_crypto_assets():
 
     return assets
 
+
+def _analysis_key(value):
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def resolve_analysis_symbol(raw_query):
+    query = (raw_query or "").strip()
+    if not query:
+        return None
+
+    query_key = _analysis_key(query)
+    if not query_key:
+        return None
+
+    symbol_lookup = {}
+    for symbol in get_global_stock_universe():
+        symbol_lookup.setdefault(_analysis_key(symbol), symbol)
+
+    direct_match = symbol_lookup.get(query_key)
+    if direct_match:
+        return direct_match
+
+    lower_query = query.lower()
+    for symbol in SP500_SYMBOLS:
+        display_name = get_asset_display_name(symbol) or symbol
+        display_key = _analysis_key(display_name)
+        if lower_query == symbol.lower() or lower_query in display_name.lower() or query_key in display_key:
+            return symbol
+
+    return None
+
+
+def extract_close_prices(hist_data):
+    try:
+        prices = (
+            hist_data.get("chart", {})
+            .get("result", [{}])[0]
+            .get("indicators", {})
+            .get("quote", [{}])[0]
+            .get("close", [])
+        )
+    except Exception:
+        return []
+
+    return [float(price) for price in prices if isinstance(price, (int, float)) and price > 0]
+
+
+def build_manual_analysis_row(raw_query, requested_action):
+    query = (raw_query or "").strip()
+    action = (requested_action or "avvakta").strip().lower()
+    action_labels = {
+        "buy": "Köp",
+        "sell": "Sälj",
+        "hold": "Avvakta",
+        "avvakta": "Avvakta",
+    }
+    requested_label = action_labels.get(action, "Avvakta")
+
+    if not query:
+        return {
+            "query": "",
+            "requested_action": requested_label,
+            "requested_action_value": action if action in action_labels else "avvakta",
+            "status": "empty",
+        }
+
+    symbol = resolve_analysis_symbol(query)
+    if not symbol:
+        return {
+            "query": query,
+            "requested_action": requested_label,
+            "requested_action_value": action if action in action_labels else "avvakta",
+            "status": "not_found",
+            "message": "Hittade ingen träff för den här raden. Testa ticker eller företagsnamn.",
+        }
+
+    price_data = get_price(symbol)
+    if not price_data:
+        return {
+            "query": query,
+            "symbol": symbol,
+            "display_name": get_asset_display_name(symbol) or symbol,
+            "requested_action": requested_label,
+            "requested_action_value": action if action in action_labels else "avvakta",
+            "status": "no_price",
+            "message": "Kunde inte hämta prisdata för den här tillgången just nu.",
+        }
+
+    if isinstance(price_data, dict):
+        price = price_data.get("price") or 0
+        volume = price_data.get("volume") or 0
+    else:
+        price = price_data or 0
+        volume = 0
+
+    hist_data = get_historical_data(symbol, "3mo")
+    prices = extract_close_prices(hist_data) if hist_data else []
+
+    signal = get_signal(price)
+    score = get_score(signal, price, symbol)
+    asset = {
+        "t": symbol,
+        "price": price,
+        "score": score,
+        "signal": signal,
+        "volume": volume,
+        "type": "stock",
+    }
+    reason = get_reason(signal, price, symbol, asset)
+    summary = get_summary(asset)
+    news_score = get_news_score(symbol)
+
+    if signal == "KÖP":
+        analysis_html = generate_investment_analysis(asset, prices=prices)
+    else:
+        asset["trigger_score"] = max(0, news_score)
+        analysis_html = generate_watch_analysis(asset)
+
+    signal_to_action = {
+        "KÖP": "Köp",
+        "SÄLJ": "Sälj",
+        "AVVAKTA": "Avvakta",
+    }
+    recommended_action = signal_to_action.get(signal, "Avvakta")
+
+    if requested_label == recommended_action:
+        alignment = "Din önskade riktning matchar AI-signalens huvudspår."
+    elif requested_label == "Avvakta":
+        alignment = "Du har markerat avvakta, vilket passar när signalen är osäker eller svag."
+    else:
+        alignment = "AI-signal och önskad riktning pekar åt olika håll, så raden bör granskas manuellt."
+
+    display_name = get_asset_display_name(symbol) or symbol
+
+    return {
+        "query": query,
+        "symbol": symbol,
+        "display_name": display_name,
+        "requested_action": requested_label,
+        "requested_action_value": action if action in action_labels else "avvakta",
+        "status": "ok",
+        "price": price,
+        "volume": volume,
+        "signal": signal,
+        "score": score,
+        "reason": reason,
+        "summary": summary,
+        "news_score": news_score,
+        "trigger_score": max(0.0, float(news_score or 0)),
+        "alignment": alignment,
+        "analysis_html": analysis_html,
+        "recommended_action": recommended_action,
+        "recommended_qty": 0,
+        "recommended_usd": 0.0,
+        "recommended_sek": 0.0,
+        "allocation_share_pct": 0,
+    }
+
+
+def apply_manual_analysis_buy_plan(analysis_rows):
+    fx_rates = get_usd_fx_rates()
+    usd_sek_rate = float(fx_rates.get("SEK", 10.5))
+    usd_eur_rate = float(fx_rates.get("EUR", 0.92))
+    capital_amount = parse_capital_amount(session.get("amount"), 10000)
+    capital_currency = (session.get("capital_currency") or "SEK").upper()
+    risk_profile = (session.get("ai_risk") or "medium").lower()
+
+    total_capital_usd = convert_capital_to_usd(
+        capital_amount,
+        capital_currency,
+        usd_sek_rate,
+        usd_eur_rate,
+    )
+
+    buy_candidates = []
+    for row in analysis_rows:
+        row["recommended_qty"] = 0
+        row["recommended_usd"] = 0.0
+        row["recommended_sek"] = 0.0
+        row["allocation_share_pct"] = 0
+
+        if row.get("status") == "ok" and row.get("signal") == "KÖP":
+            row["trigger_score"] = max(0.0, float(row.get("trigger_score") or row.get("news_score") or 0))
+            buy_candidates.append(row)
+
+    enrich_with_buy_plan(buy_candidates, total_capital_usd, usd_sek_rate, risk_profile)
+    return analysis_rows
+
 # ✅ HUVUDFUNKTION (ERSÄTTER DIN GAMLA)
 def get_market_assets():
 
@@ -1836,7 +2120,16 @@ def get_stop_loss(price, risk):
     return round(price * 0.90, 2)
 
 # ===== AI =====
-def get_signal(price):
+def get_signal(price, score=None):
+
+    if score is not None:
+        if score >= 72:
+            return "KÖP"
+        elif score >= 55:
+            return "AVVAKTA KÖP"
+        elif score <= 35:
+            return "SÄLJ"
+        return "AVVAKTA"
 
     if price < 20:
         return "KÖP"
@@ -1844,7 +2137,7 @@ def get_signal(price):
         return "AVVAKTA KÖP"
     elif price > 500:
         return "SÄLJ"
-    
+
     return "AVVAKTA"
 
 def is_tradeable(s):
@@ -1922,7 +2215,8 @@ def get_reason(sig, price, t, s=None):
             reasons.append("⚠️ Låg likviditet")
 
     # ✅ crypto vs aktie
-    if len(t) > 5:
+    asset_type = (s or {}).get("type") if isinstance(s, dict) else None
+    if asset_type == "crypto" or (asset_type is None and len(t) > 5 and "." not in t and "-" not in t):
         reasons.append("⚠️ Crypto – hög volatilitet")
 
     return "\n".join(reasons)
@@ -2163,7 +2457,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         if isinstance(price, dict):
             price = price.get("price", 0)
 
-        sig = get_signal(price)
+        sig_base = get_signal(price)
        
         if isinstance(price, dict):
             price = price.get("price", 0)
@@ -2206,7 +2500,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
             news_weight = 3
 
         # ✅ base score
-        base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
+        base = 80 if sig_base == "KÖP" else 60 if sig_base == "AVVAKTA KÖP" else 30
 
         total_score = (
             base
@@ -2272,9 +2566,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         if trend_score <= 0 and ma_score <= 0:
             total_score -= 2
 
-        s["signal"] = sig
         s["score"] = max(0, min(100, int(total_score)))
-        s["reason"] = get_reason(sig, price, s["t"], s)
+        s["signal"] = get_signal(price, s["score"])
+        s["reason"] = get_reason(s["signal"], price, s["t"], s)
         s["summary"] = get_summary(s)
 
         # ✅ AI confidence (0–100%)
@@ -2305,6 +2599,20 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         result = stock_results[:10] + result
 
     result = [s for s in result if s["price"] > 0]
+
+    signal_counts = {"KÖP": 0, "AVVAKTA KÖP": 0, "AVVAKTA": 0, "SÄLJ": 0}
+    for item in result:
+        signal = item.get("signal", "AVVAKTA")
+        signal_counts[signal] = signal_counts.get(signal, 0) + 1
+
+    logger.info(
+        "AI signal distribution | KÖP=%s AVVAKTA_KÖP=%s AVVAKTA=%s SÄLJ=%s total=%s",
+        signal_counts.get("KÖP", 0),
+        signal_counts.get("AVVAKTA KÖP", 0),
+        signal_counts.get("AVVAKTA", 0),
+        signal_counts.get("SÄLJ", 0),
+        len(result),
+    )
 
     print("---- DEBUG TOP ASSETS ----")
     for s in result[:15]:
@@ -2694,6 +3002,12 @@ def portfolio_ai_decision(pl_pct, current_price, start_price, t, risk, strategy)
     # Use cached/neutral news in interactive dashboard requests.
     news = get_news_score(t, allow_network=False)
     trend = 0
+    if start_price > 0:
+        trend_pct = (current_price - start_price) / start_price * 100
+        if trend_pct > 3:
+            trend = 1
+        elif trend_pct < -3:
+            trend = -1
     
     # ===== Strategy =====
 
@@ -5156,7 +5470,7 @@ def build_watch_summary(s):
     if signal == "KÖP":
         lead = "AI ser visst köpmomentum, men tillgången är inte prioriterad för direkt köp just nu."
     elif signal == "SÄLJ":
-        lead = "AI ser svaghet i nuläget och rekommenderar att avvakta innan nytt beslut."
+        lead = "AI ser svaghet i nuläget och lutar mot sälj eller minskad exponering."
     else:
         lead = "Signalen är neutral och tillräckligt svag för att avvakta just nu."
 
@@ -5183,7 +5497,7 @@ def generate_watch_analysis(s):
     if signal == "KÖP":
         current_state = "Köpsignal finns, men tillgången är nedprioriterad jämfört med starkare kandidater."
     elif signal == "SÄLJ":
-        current_state = "Svaga signaler dominerar, därför är bästa läget just nu att avvakta nytt köp."
+        current_state = "Säljsignal dominerar, så en försiktigare position eller försäljning är mer rimlig än nytt köp."
     else:
         current_state = "Signalen är neutral och saknar tillräcklig styrka för ett aktivt köpbeslut."
 
@@ -5195,7 +5509,7 @@ def generate_watch_analysis(s):
     analysis_html = f"""
 <div style="margin-bottom: 14px;">
     <strong style="font-size:1.05rem;">📌 Sammanfattning</strong><br>
-    <span style="font-size:0.95rem;">AI rekommenderar <strong>AVVAKTA</strong> för <strong>{symbol}</strong>. Nuvarande score: <strong>{score}</strong>, trigger: <strong>{trigger}</strong>.</span>
+    <span style="font-size:0.95rem;">AI rekommenderar <strong>{signal}</strong> för <strong>{symbol}</strong>. Nuvarande score: <strong>{score}</strong>, trigger: <strong>{trigger}</strong>.</span>
 </div>
 
 <div style="margin-bottom: 14px;">
@@ -5569,6 +5883,7 @@ def dashboard():
             or "priority" in request.form
             or "send_buy_alerts" in request.form
             or "send_sell_alerts" in request.form
+            or "block_loss_sells" in request.form
             or "pf_strategy" in request.form
             or "pf_risk" in request.form
         )
@@ -5596,6 +5911,7 @@ def dashboard():
     if settings_form_submitted:
         send_buy_alerts = request.form.get("send_buy_alerts") == "on"
         send_sell_alerts = request.form.get("send_sell_alerts") == "on"
+        block_loss_sells = request.form.get("block_loss_sells") == "on"
     else:
         send_buy_alerts = coerce_bool_setting(
             session.get("send_buy_alerts", user_settings.get("send_buy_alerts", False)),
@@ -5603,6 +5919,10 @@ def dashboard():
         )
         send_sell_alerts = coerce_bool_setting(
             session.get("send_sell_alerts", user_settings.get("send_sell_alerts", False)),
+            default=False,
+        )
+        block_loss_sells = coerce_bool_setting(
+            session.get("block_loss_sells", user_settings.get("block_loss_sells", False)),
             default=False,
         )
     if not is_alerts_enabled():
@@ -5617,6 +5937,7 @@ def dashboard():
     session["capital_currency"] = capital_currency
     session["send_buy_alerts"] = send_buy_alerts
     session["send_sell_alerts"] = send_sell_alerts
+    session["block_loss_sells"] = block_loss_sells
 
     # Portfolio strategy/risk are independent from dashboard strategy/risk.
     pf_strategy = request.form.get("pf_strategy") or session.get("pf_strategy") or user_settings.get("pf_strategy", "short")
@@ -5635,6 +5956,7 @@ def dashboard():
             "priority": priority,
             "send_buy_alerts": bool(send_buy_alerts),
             "send_sell_alerts": bool(send_sell_alerts),
+            "block_loss_sells": bool(block_loss_sells),
             "pf_strategy": pf_strategy,
             "pf_risk": pf_risk,
         },
@@ -5649,9 +5971,12 @@ def dashboard():
         ai_loading = True
         ensure_ai_background_loading(ai_strategy, ai_risk, amount)
 
+    loss_blocked_tickers = get_loss_blocked_tickers(user) if block_loss_sells else set()
+    ranked_for_recommendations = [s for s in ranked if s.get("t") not in loss_blocked_tickers]
+
     # ✅ GLOBAL TOP
     top_global = [
-        s for s in ranked
+        s for s in ranked_for_recommendations
         if s.get("score", 0) >= 75 and s.get("trigger_score", 0) >= 2
     ][:5]
 
@@ -5727,7 +6052,7 @@ def dashboard():
     owned_symbols = {x.get("t") for x in pf}
 
     stock_candidates = [
-        x for x in ranked
+        x for x in ranked_for_recommendations
         if x.get("type") != "crypto" and x.get("t") not in owned_symbols
     ]
     stock_buy_candidates = [
@@ -5737,7 +6062,7 @@ def dashboard():
     stock_buy_candidates = dedupe_by_symbol(stock_buy_candidates)
 
     crypto_candidates = [
-        x for x in ranked
+        x for x in ranked_for_recommendations
         if x.get("type") == "crypto" and x.get("t") not in owned_symbols
     ]
 
@@ -5865,7 +6190,7 @@ def dashboard():
 
     selected_symbols = {x.get("t") for x in stocks + crypto}
     watch_candidates = [
-        x for x in ranked
+        x for x in ranked_for_recommendations
         if x.get("signal") != "KÖP"
         and x.get("t") not in selected_symbols
         and x.get("t") not in owned_symbols
@@ -5964,6 +6289,7 @@ def dashboard():
         priority=priority,
         send_buy_alerts=send_buy_alerts,
         send_sell_alerts=send_sell_alerts,
+        block_loss_sells=block_loss_sells,
         alerts_enabled=is_alerts_enabled(),
         usd_sek=usd_sek_rate,
         top_global=top_global,
@@ -6009,6 +6335,17 @@ def portfolio_page():
     if mintrend_currency not in {"SEK", "USD", "EUR"}:
         mintrend_currency = "USD"
 
+    user_settings = load_user_settings(user)
+    if request.method == "POST" and (
+        "pf_strategy" in request.form or "pf_risk" in request.form or "block_loss_sells" in request.form
+    ):
+        block_loss_sells = request.form.get("block_loss_sells") == "on"
+    else:
+        block_loss_sells = coerce_bool_setting(
+            session.get("block_loss_sells", user_settings.get("block_loss_sells", False)),
+            default=False,
+        )
+
     ranked = ai_results_cache.get("data") or ai_cache.get("data") or []
     ai_loading = False
     if not ranked:
@@ -6038,6 +6375,16 @@ def portfolio_page():
     pf_risk = request.form.get("pf_risk") or session.get("pf_risk", "medium")
     session["pf_strategy"] = pf_strategy
     session["pf_risk"] = pf_risk
+    session["block_loss_sells"] = block_loss_sells
+
+    save_user_settings(
+        user,
+        {
+            "pf_strategy": pf_strategy,
+            "pf_risk": pf_risk,
+            "block_loss_sells": bool(block_loss_sells),
+        },
+    )
 
     pf = portfolio(user)
 
@@ -6184,6 +6531,7 @@ def portfolio_page():
         pf_strategy=pf_strategy,
         pf_risk=pf_risk,
         capital_currency=session.get("capital_currency", "SEK"),
+        block_loss_sells=block_loss_sells,
         send_buy_alerts=send_buy_alerts,
         send_sell_alerts=send_sell_alerts,
         alerts_enabled=is_alerts_enabled(),
@@ -6202,6 +6550,108 @@ def portfolio_page():
         stocks=[],
         crypto=[],
         wait=[],
+    )
+
+
+@app.route("/analysis_search", methods=["GET", "POST"])
+def analysis_search():
+
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+
+    is_admin = is_admin_email(user)
+    user_platforms = get_user_trading_platforms(user)
+    platform_names = build_platform_names_for_header(user_platforms)
+
+    row_count = 8
+    analysis_rows = []
+    for idx in range(1, row_count + 1):
+        input_value = request.form.get(f"analysis_input_{idx}", "") if request.method == "POST" else ""
+        action_value = request.form.get(f"analysis_action_{idx}", "avvakta") if request.method == "POST" else "avvakta"
+        result = build_manual_analysis_row(input_value, action_value)
+        result["index"] = idx
+        analysis_rows.append(result)
+
+    apply_manual_analysis_buy_plan(analysis_rows)
+
+    submitted = request.method == "POST"
+    filled_rows = sum(1 for row in analysis_rows if row.get("status") not in {"empty"})
+    trade_action = (request.form.get("trade_action") or "").strip().lower()
+
+    def _parse_qty(raw_value, fallback_value=0):
+        txt = (raw_value or "").strip()
+        if not txt:
+            return int(fallback_value or 0)
+        try:
+            qty = int(float(txt))
+        except Exception:
+            qty = 0
+        return max(0, qty)
+
+    if request.method == "POST" and trade_action in {"buy_one", "buy_all"}:
+        bought = []
+        target_index = request.form.get("target_index")
+        target_row = None
+        if trade_action == "buy_one" and target_index:
+            try:
+                idx_value = int(target_index)
+            except Exception:
+                idx_value = 0
+            target_row = next((row for row in analysis_rows if row.get("index") == idx_value), None)
+
+        candidate_rows = analysis_rows if trade_action == "buy_all" else ([target_row] if target_row else [])
+        for row in candidate_rows:
+            if not row or row.get("status") != "ok":
+                continue
+
+            qty_key = f"buyqty_{row['index']}"
+            qty = _parse_qty(request.form.get(qty_key), row.get("recommended_qty", 0))
+            if qty <= 0:
+                continue
+
+            buy(user, row["symbol"], qty, row.get("price", 0))
+            bought.append(
+                {
+                    "index": row["index"],
+                    "symbol": row["symbol"],
+                    "qty": qty,
+                    "price": row.get("price", 0),
+                }
+            )
+
+        payload = {
+            "ok": True,
+            "bought": bought,
+            "redirect_url": "/dashboard?tab=portfolio",
+            "message": "Köpet har registrerats och ligger nu i portfolio.",
+        }
+
+        if request.headers.get("X-Requested-With") == "analysis-search":
+            return jsonify(payload)
+
+        return redirect("/dashboard?tab=portfolio")
+
+    if request.method == "POST" and request.headers.get("X-Requested-With") == "analysis-search":
+        return jsonify(
+            {
+                "ok": True,
+                "filled_rows": filled_rows,
+                "row_count": row_count,
+                "analysis_rows": analysis_rows,
+            }
+        )
+
+    return render_template(
+        "analysis_search.html",
+        user=user,
+        platform_names=platform_names,
+        is_admin=is_admin,
+        analysis_rows=analysis_rows,
+        row_count=row_count,
+        submitted=submitted,
+        filled_rows=filled_rows,
+        active_page="analysis_search",
     )
 
 

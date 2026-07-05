@@ -1,22 +1,22 @@
 # Checklista för att åtgärda Dashboard & Portfolio
 
-1. Fix dashboard render:
-   - Uppdatera `app.py` så att den skickar listor `stocks`, `crypto`, `wait` till mallen istället för HTML-strängar.
+1. ~~Fix dashboard render:~~
+   - Klar i kod: `app.py` skickar nu listor `stocks`, `crypto`, `wait` till mallen.
    - Fil: [app.py](app.py)
 
-2. Fix dashboard anchors:
-   - Rätta till felaktiga/stray `</a>` i [Templates/dashboard.html](Templates/dashboard.html).
+2. ~~Fix dashboard anchors:~~
+   - Klar i kod: de uppenbara stray-ankarna i [Templates/dashboard.html](Templates/dashboard.html) är åtgärdade.
 
-3. Fix buy/news links:
-   - Korrigera `get_buy_link()` och nyhetslänken i `render_asset()` så att de använder giltiga `<a href="..."></a>`.
+3. ~~Fix buy/news links:~~
+   - Klar i kod: `get_buy_link()` och nyhetslänken bygger giltiga `<a href="..."></a>`.
    - Fil: [app.py](app.py)
 
-4. Fix portfolio render:
-   - Åtgärda `portfolio_page()` så att den inte försöker rendera en saknad `portfolio.html` eller säkerställ att variabler finns.
+4. ~~Fix portfolio render:~~
+   - Klar i kod: `portfolio_page()` renderar nu samma dashboard-template med rätt variabler.
    - Fil: [app.py](app.py)
 
-5. Remove unused import:
-   - Ta bort eller använd `from main import signal` i `app.py` för att undvika döda importer.
+5. ~~Remove unused import:~~
+   - Klar i kod: `from main import signal` finns inte längre i [app.py](app.py).
    - Fil: [app.py](app.py)
 
 6. Consolidate trade logic:
@@ -43,8 +43,8 @@
 12. Commit changes:
     - Gör commit med tydligt meddelande efter varje logisk förändring.
 
-13. Export checklist file:
-    - Denna fil (`CHECKLIST.md`) skapad för nedladdning och steg-för-steg arbete.
+13. ~~Export checklist file:~~
+   - Klar: denna fil (`CHECKLIST.md`) finns redan och används som arbetslista.
 
 ---
 
@@ -54,17 +54,17 @@ Vill du att jag också automatiskt skapar en PR med dessa ändringar eller kör 
 
 # Checklista: Migrera från filer till Postgres på Render
 
-1. Bekräfta dependency:
-   - [x] `psycopg[binary]` finns i `requirements.txt`.
+1. [x] Bekräfta dependency:
+   - `psycopg[binary]` finns i `requirements.txt`.
 
-2. Kontrollera filer som ska migreras:
+2. [x] Kontrollera filer som ska migreras:
    - `stock_data/users.txt`
    - `stock_data/pending.txt`
    - `stock_data/admins.txt`
    - `stock_data/my_trades.txt`
    - `stock_data/user_settings.json`
 
-3. Säkerställ att schemafil och script finns:
+3. [x] Säkerställ att schemafil och script finns:
    - `db_schema.sql`
    - `migrate_to_postgres.py`
 
@@ -100,3 +100,37 @@ Vill du att jag också automatiskt skapar en PR med dessa ändringar eller kör 
 
 12. Behåll filer som backup tills allt verifierats:
    - Ta inte bort textfiler förrän produktion är stabil.
+
+---
+
+# Checklista: Blockera köp-rekommendationer för sålda trades med förlust
+
+1. Lägg till en ny inställning i portfolio-formuläret:
+   - Checkbox precis ovanför SÄLJ-blocket.
+   - Text: "Blocka trades sålda med förlust".
+   - Lägg till en liten inforuta som förklarar att AI inte kommer att rekommendera trades som sålts med förlust när rutan är ibockad.
+
+2. Spara inställningen per användare i databasen på Render:
+   - Lägg till en boolean-kolumn i `user_settings`, t.ex. `block_loss_sells`.
+   - Se till att `db_save_settings()` och `db_load_settings()` hanterar fältet.
+   - Behåll fallback för fil-läge om databasen inte används.
+
+3. Spåra säljtillfällen så att förlustaffärer kan identifieras:
+   - Spara avslutade säljposter i DB eller separat historik så man kan se inköpspris vs säljpris.
+   - Säkerställ att ticker, användare, qty, buy price och sell price finns att läsa senare.
+
+4. Filtrera bort förlustsålda ticker i AI-köpen när inställningen är på:
+   - Exkludera dessa från köp-listor för aktier och krypto.
+   - Håll logiken så att samma ticker kan komma tillbaka om användaren avmarkerar rutan.
+
+5. Visa valet i portföljen ovanför SÄLJ:
+   - Placera inställningen exakt ovanför SÄLJ-sektionen i [Templates/dashboard.html](Templates/dashboard.html).
+   - Se till att den sparas via samma POST-formulär som övriga portfolio-inställningar.
+
+6. Verifiera i Render:
+   - Deploya om efter schemaändring.
+   - Testa att en förlustsåld ticker inte återkommer som köp när rutan är ibockad.
+   - Testa att den kan rekommenderas igen när rutan tas bort.
+
+7. Kom ihåg vid paus:
+   - Om arbetet avbryts, börja med att kontrollera DB-schema, portfolio-formuläret och köpfiltreringen innan vidare ändringar.

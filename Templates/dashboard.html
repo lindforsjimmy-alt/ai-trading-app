@@ -1397,6 +1397,7 @@
                     <div class="header-actions">
                         <a class="top-action" href="/change_trading_platform">Ändra Handelsplattform</a>
                         <a class="top-action" href="/change_password">Byt lösenord</a>
+                        <a class="top-action" href="/analysis_search">Sök analys</a>
                         <form method="POST" action="/delete_account" style="margin:0;">
                             <button class="top-action logout" type="submit"
                                 onclick="return confirm('Är du säker på att du vill avregistrera konto?');">Avregistrera
@@ -1867,6 +1868,19 @@
                 <option value="medium" {% if pf_risk=="medium" %}selected{% endif %}>Medel</option>
                 <option value="high" {% if pf_risk=="high" %}selected{% endif %}>Hög</option>
             </select><br><br>
+
+            <div
+                style="margin: 6px 0 14px; padding: 12px 14px; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 12px; background: rgba(15, 23, 42, 0.55);">
+                <label
+                    style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:0.95rem; line-height:1.5;">
+                    <input type="checkbox" name="block_loss_sells" {% if block_loss_sells %}checked{% endif %}>
+                    <span>
+                        <strong>Blocka trades sålda med förlust</strong><br>
+                        <span style="color:#b3c7df; font-size:0.88rem;">AI rekommenderar inte längre trades som tidigare
+                            sålts med förlust. Ta bort markeringen om du vill inkludera dem igen.</span>
+                    </span>
+                </label>
+            </div>
 
             <div class="portfolio-actions-row">
                 <button>Analysera Portfolio</button>

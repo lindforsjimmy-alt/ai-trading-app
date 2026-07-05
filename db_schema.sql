@@ -37,6 +37,27 @@ CREATE INDEX IF NOT EXISTS ix_trades_user_created
 CREATE INDEX IF NOT EXISTS ix_trades_user_ticker
   ON trades (user_id, ticker);
 
+CREATE TABLE IF NOT EXISTS trade_sales (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ticker TEXT NOT NULL,
+  qty NUMERIC(20,8) NOT NULL CHECK (qty > 0),
+  avg_buy_price NUMERIC(20,8) NOT NULL CHECK (avg_buy_price >= 0),
+  sell_price NUMERIC(20,8) NOT NULL CHECK (sell_price >= 0),
+  realized_pnl_pct NUMERIC(12,4) NOT NULL,
+  sold_with_loss BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ix_trade_sales_user_created
+  ON trade_sales (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_trade_sales_user_ticker
+  ON trade_sales (user_id, ticker);
+
+CREATE INDEX IF NOT EXISTS ix_trade_sales_user_loss
+  ON trade_sales (user_id, sold_with_loss);
+
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   amount NUMERIC(18,2) NOT NULL DEFAULT 10000,
@@ -47,6 +68,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   priority TEXT NOT NULL DEFAULT 'mix',
   send_buy_alerts BOOLEAN NOT NULL DEFAULT FALSE,
   send_sell_alerts BOOLEAN NOT NULL DEFAULT FALSE,
+  block_loss_sells BOOLEAN NOT NULL DEFAULT FALSE,
   pf_strategy TEXT NOT NULL DEFAULT 'short',
   pf_risk TEXT NOT NULL DEFAULT 'medium',
   mintrend_index_total TEXT NOT NULL DEFAULT 'STANDARD',

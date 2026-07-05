@@ -7,10 +7,10 @@ Denna checklista ar gjord for ditt lage just nu: dry-run fungerade, riktig korni
 1. Stang gamla CMD-fonster och oppna ett nytt.
 2. Gaa till projektmappen:
    - cd C:\Users\lindf\OneDrive\Finans\AI-bors
-3. Bekrafta att filerna finns:
+3. [x] Bekrafta att filerna finns:
    - db_schema.sql
    - migrate_to_postgres.py
-4. Bekrafta att psycopg finns installerat:
+4. [x] Bekrafta att psycopg finns installerat:
    - python -c "import psycopg; print('psycopg OK')"
 
 ## Del B - Hamta ratt URL i Render
