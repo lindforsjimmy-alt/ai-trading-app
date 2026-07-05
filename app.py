@@ -5803,6 +5803,59 @@ def dedupe_by_symbol(items):
     return out
 
 
+def build_emergency_recommendations(limit=5):
+    """Build a minimal fallback list so dashboard is never empty."""
+    try:
+        target_limit = max(1, int(limit or 5))
+    except Exception:
+        target_limit = 5
+
+    seeds = [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "V", "MA", "JPM", "TSLA", "SPY", "QQQ",
+    ]
+    out = []
+    seen = set()
+
+    for symbol in seeds:
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+
+        price_data = get_price(symbol)
+        if isinstance(price_data, dict):
+            price = float(price_data.get("price") or 0)
+            volume = float(price_data.get("volume") or 0)
+        else:
+            price = float(price_data or 0)
+            volume = 0.0
+
+        if price <= 0:
+            continue
+
+        display_name = get_asset_display_name(symbol) or symbol
+        out.append(
+            {
+                "t": symbol,
+                "name": display_name,
+                "display_name": display_name,
+                "type": "stock",
+                "currency": "USD",
+                "price": price,
+                "volume": volume,
+                "score": 55,
+                "signal": "AVVAKTA KÖP",
+                "trigger_score": 1,
+                "trigger_reasons": ["Reservläge"],
+                "reason": "Reservläge: tillfälligt urval medan full AI-scan laddar.",
+                "summary": "Reservrekommendation för att undvika tom dashboard under cache/API-störning.",
+            }
+        )
+        if len(out) >= target_limit:
+            break
+
+    return out
+
+
 @app.route("/api/mintrend-data", methods=["GET"])
 def api_mintrend_data():
     user = session.get("user")
@@ -6088,12 +6141,20 @@ def dashboard():
     
     ranked = ai_results_cache.get("data") or ai_cache.get("data")
     ai_loading = False
+    emergency_recommendations = False
 
     if not ranked:
-        print("⚠️ AI-cache tom – visar snabb vy och laddar i bakgrunden")
-        ranked = []
-        ai_loading = True
-        ensure_ai_background_loading(ai_strategy, ai_risk, amount)
+        print("⚠️ AI-cache tom – försöker direkt omkörning")
+        ranked = safe_fetch(lambda: run_daily_ai(ai_strategy, ai_risk, amount)) or []
+
+        if ranked:
+            print(f"✅ AI omkörning klar – laddade {len(ranked)} kandidater")
+        else:
+            print("⚠️ AI-scan gav inga kandidater – startar bakgrundsladdning + reservlista")
+            ensure_ai_background_loading(ai_strategy, ai_risk, amount)
+            ranked = build_emergency_recommendations(max(top_n, 5))
+            emergency_recommendations = bool(ranked)
+            ai_loading = not emergency_recommendations
 
     loss_blocked_tickers = get_loss_blocked_tickers(user) if block_loss_sells else set()
     ranked_for_recommendations = [s for s in ranked if s.get("t") not in loss_blocked_tickers]
@@ -6185,6 +6246,26 @@ def dashboard():
     ]
     stock_buy_candidates = dedupe_by_symbol(stock_buy_candidates)
 
+    def _fill_recommendations(primary_candidates, full_candidates, limit):
+        selected = list(primary_candidates[:limit])
+        if len(selected) >= limit:
+            return selected
+
+        selected_symbols = {x.get("t") for x in selected}
+
+        # Fallback 1: include AVVAKTA KÖP when strict KÖP is too sparse.
+        avvakta_kop = [
+            x for x in full_candidates
+            if x.get("signal") == "AVVAKTA KÖP" and x.get("t") not in selected_symbols
+        ]
+        for cand in avvakta_kop:
+            selected.append(cand)
+            selected_symbols.add(cand.get("t"))
+            if len(selected) >= limit:
+                return selected
+
+        return selected
+
     crypto_candidates = [
         x for x in ranked_for_recommendations
         if x.get("type") == "crypto" and x.get("t") not in owned_symbols
@@ -6200,18 +6281,22 @@ def dashboard():
     ]
     crypto_buy_candidates = dedupe_by_symbol(crypto_buy_candidates)
 
+    # Ensure dashboard always has recommendation rows, even when strict KÖP is scarce.
+    stock_display_candidates = _fill_recommendations(stock_buy_candidates, stock_candidates, top_n)
+    crypto_display_candidates = _fill_recommendations(crypto_buy_candidates, crypto_candidates, top_n)
+
     # ✅ PRIORITY
     if priority == "stocks":
-        stocks = stock_buy_candidates[:top_n]
+        stocks = stock_display_candidates[:top_n]
         crypto = []
 
     elif priority == "crypto":
-        crypto = crypto_buy_candidates[:top_n]
+        crypto = crypto_display_candidates[:top_n]
         stocks = []
 
     else:  # mix
-        stocks = stock_buy_candidates[:top_n]
-        crypto = crypto_buy_candidates[:top_n]
+        stocks = stock_display_candidates[:top_n]
+        crypto = crypto_display_candidates[:top_n]
 
     # stocks = enrich_with_fundamentals(stocks)  # ⏳ DISABLED: Too slow with rate-limited API - causing dashboard timeouts
     # TODO: Implement async fundamentals fetching or client-side enrichment
@@ -6312,22 +6397,6 @@ def dashboard():
                     sell(user, t, int(qty))
                     return redirect("/dashboard?tab=portfolio")
 
-    selected_symbols = {x.get("t") for x in stocks + crypto}
-    watch_candidates = [
-        x for x in ranked_for_recommendations
-        if x.get("signal") != "KÖP"
-        and x.get("t") not in selected_symbols
-        and x.get("t") not in owned_symbols
-    ]
-
-    wait = []
-    for item in watch_candidates[:top_n * 2]:
-        w = dict(item)
-        w["watch_signal"] = "AVVAKTA"
-        w["watch_summary"] = build_watch_summary(item)
-        w["watch_analysis"] = generate_watch_analysis(item)
-        wait.append(w)
-
     # ✅ GENERATE INVESTMENT ANALYSIS FOR BUY SIGNALS
     if not quick_bootstrap:
         for s in stocks + crypto:
@@ -6399,7 +6468,7 @@ def dashboard():
         percent=percent,
         stocks=stocks,
         crypto=crypto,
-        wait=wait,
+        wait=[],
         sell_list=sell_list,
         buy_more_list=buy_more_list,
         wait_list=wait_list,
@@ -6419,8 +6488,9 @@ def dashboard():
         top_global=top_global,
         ai_loading=ai_loading,
         quick_bootstrap=quick_bootstrap,
+        emergency_recommendations=emergency_recommendations,
         ranked_count=len(ranked),
-        visible_count=len(stocks) + len(crypto) + len(wait),
+        visible_count=len(stocks) + len(crypto),
         active_tab=active_tab,
         min_trend_data=min_trend_data,
         mintrend_index_key=mintrend_index_key,

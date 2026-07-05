@@ -577,21 +577,6 @@
             border-color: rgba(112, 224, 0, 0.45);
         }
 
-        .signal-buy {
-            color: var(--success);
-            font-weight: 700;
-        }
-
-        .signal-wait {
-            color: var(--warning);
-            font-weight: 700;
-        }
-
-        .signal-sell {
-            color: var(--danger);
-            font-weight: 700;
-        }
-
         .buy-plan-text {
             font-size: 0.88rem;
             color: var(--success);
@@ -1783,12 +1768,15 @@
 
         <div class="selection-note">
             {% if priority == "stocks" %}
-            Visar {{ stocks|length }} av {{ top_n }} valda aktier (endast KÖP-signaler).
+            Visar {{ stocks|length }} av {{ top_n }} valda aktier (KÖP först, annars AVVAKTA KÖP).
             {% elif priority == "crypto" %}
-            Visar {{ crypto|length }} av {{ top_n }} valda kryptokandidater (endast KÖP-signaler).
+            Visar {{ crypto|length }} av {{ top_n }} valda kryptokandidater (KÖP först, annars AVVAKTA KÖP).
             {% else %}
-            Visar {{ stocks|length }} av {{ top_n }} aktier och {{ crypto|length }} av {{ top_n }} krypto (endast
-            KÖP-signaler).
+            Visar {{ stocks|length }} av {{ top_n }} aktier och {{ crypto|length }} av {{ top_n }} krypto (KÖP först,
+            annars AVVAKTA KÖP).
+            {% endif %}
+            {% if emergency_recommendations %}
+            <br>Reservläge aktivt: visar tillfälliga kandidater medan full AI-scan laddar.
             {% endif %}
         </div>
 
@@ -1821,10 +1809,6 @@
                     Pris: {{ '%.2f' % s.price }} USD<br>
 
                     Score: {{ s.score }}<br>
-
-                    <span class="{% if s.signal=='KÖP' %}signal-buy{% else %}signal-wait{% endif %}">
-                        {{ s.signal }}
-                    </span>
                     {% if s.signal=='KÖP' %}
                     <div class="buy-plan-text">
                         AI köpplan: {{ s.recommended_qty if s.recommended_qty is defined else 0 }} st
@@ -1896,11 +1880,6 @@
                     Pris: {% if s.price is defined %}{{ '%.2f' % s.price }} USD{% else %}-{% endif %}<br>
 
                     Score: {% if s.score is defined %}{{ s.score }}{% else %}-{% endif %}<br>
-
-                    <span
-                        class="{% if s.signal is defined and s.signal=='KÖP' %}signal-buy{% elif s.signal is defined and s.signal=='SÄLJ' %}signal-sell{% else %}signal-wait{% endif %}">
-                        {{ s.signal if s.signal is defined else 'AVVAKTA' }}
-                    </span>
                     {% if s.signal is defined and s.signal=='KÖP' %}
                     <div class="buy-plan-text">
                         AI köpplan: {{ s.recommended_qty if s.recommended_qty is defined else 0 }} st
@@ -1954,70 +1933,6 @@
                 {% else %}
                 <div class="asset-box">
                     Inga kryptokandidater just nu.
-                </div>
-                {% endfor %}
-
-            </div>
-
-            <!-- AVVAKTA -->
-            <div class="box">
-                <h3>👀 BEVAKNINGSLISTA</h3>
-
-                {% for s in wait %}
-                <div class="asset-box">
-                    <b>{{ s.display_name or s.t }}</b><br>
-
-                    Pris: {% if s.price is defined %}{{ '%.2f' % s.price }} USD{% else %}-{% endif %}<br>
-
-                    Score: {% if s.score is defined %}{{ s.score }}{% else %}-{% endif %}<br>
-
-                    <span class="signal-wait">{{ s.watch_signal if s.watch_signal is defined else 'AVVAKTA' }}</span>
-
-                    <br><br>
-                    <div class="platform-links">
-                        {% if platform_links %}
-                        {% for p in platform_links %}
-                        <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">🔗 {{ p.name }} inloggning</a>{%
-                        if not loop.last %}<br>{% endif %}
-                        {% endfor %}
-                        {% else %}
-                        {% if s.type == 'crypto' %}
-                        <a href="https://safello.com/sv/" target="_blank" rel="noopener noreferrer">🔗 Safello
-                            inloggning</a>
-                        {% else %}
-                        <a href="https://www.avanza.se/" target="_blank" rel="noopener noreferrer">🔗 Avanza
-                            inloggning</a>
-                        {% endif %}
-                        {% endif %}
-                    </div>
-
-                    <br><br>
-                    <button onclick="togglePopup(this)">AI Analys</button>
-
-                    <div class="ai-popup">
-                        <button onclick="closePopup(this)">❌</button>
-                        {% if s.watch_analysis %}
-                        <div style="font-size: 0.95rem; line-height: 1.6; color: #e2e8f0;">
-                            {{ s.watch_analysis|safe }}
-                        </div>
-                        {% elif s.watch_summary %}
-                        {{ s.watch_summary }}
-                        {% elif s.summary %}
-                        {{ s.summary }}
-                        {% else %}
-                        Ingen AI-analys tillgänglig för denna kandidat ännu.
-                        {% endif %}
-                    </div>
-
-                    <form method="POST">
-                        <input name="buyqty_{{ s.t }}">
-                        <button name="buy_{{ s.t }}">Köp</button>
-                    </form>
-                </div>
-                <hr>
-                {% else %}
-                <div class="asset-box">
-                    Inga poster i bevakningslistan just nu.
                 </div>
                 {% endfor %}
 
