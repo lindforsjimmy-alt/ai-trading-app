@@ -120,6 +120,42 @@
             border-color: rgba(248, 113, 113, 0.55);
         }
 
+        .ui-icon,
+        .tab-icon-svg,
+        .portfolio-icon-svg {
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.14em;
+            margin-right: 0.35em;
+            flex: 0 0 auto;
+        }
+
+        .ui-icon {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .tab-icon-svg {
+            color: #9bdcff;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .portfolio-icon-svg {
+            color: var(--accent);
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         .hero-tagline {
             margin: 0;
             font-size: 0.92rem;
@@ -1386,6 +1422,97 @@
 
     <script id="min-trend-data" type="application/json">{{ min_trend_data|tojson }}</script>
 
+    <svg aria-hidden="true" focusable="false" width="0" height="0"
+        style="position:absolute; left:-9999px; overflow:hidden">
+        <symbol id="icon-dashboard" viewBox="0 0 24 24">
+            <path d="M4 13a8 8 0 1 1 16 0" />
+            <path d="M12 13l4.5-4.5" />
+            <circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none" />
+            <path d="M8 19h8" />
+        </symbol>
+        <symbol id="icon-trend-up" viewBox="0 0 24 24">
+            <path d="M4 17h16" />
+            <path d="M5 15l5-5 4 4 5-7" />
+            <path d="M14 7h5v5" />
+        </symbol>
+        <symbol id="icon-trend-down" viewBox="0 0 24 24">
+            <path d="M4 7h16" />
+            <path d="M5 9l5 5 4-4 5 7" />
+            <path d="M14 17h5v-5" />
+        </symbol>
+        <symbol id="icon-users" viewBox="0 0 24 24">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M3.8 19a5.2 5.2 0 0 1 10.4 0" />
+            <circle cx="17" cy="10" r="2.4" />
+            <path d="M13.6 19a4.2 4.2 0 0 1 8.4 0" />
+        </symbol>
+        <symbol id="icon-warning" viewBox="0 0 24 24">
+            <path d="M12 4.5 20.2 18H3.8L12 4.5Z" />
+            <path d="M12 9v4" />
+            <circle cx="12" cy="16.2" r="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="icon-target" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" />
+            <circle cx="12" cy="12" r="4" />
+            <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="icon-rocket" viewBox="0 0 24 24">
+            <path d="M14.2 4.8c2.9.2 4.9 2.2 5.1 5.1l-4.2 4.2-5.1-5.1 4.2-4.2Z" />
+            <path d="M9.8 9.2 6 13c-.5 2.2-.9 4.3-1 6 1.7-.1 3.8-.5 6-1l3.8-3.8" />
+            <path d="M10.8 13.2 6.5 17.5" />
+            <circle cx="15.8" cy="8.2" r="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="icon-fire" viewBox="0 0 24 24">
+            <path
+                d="M12 3.5c.7 2.2-.6 3.8-1.7 5.1-.9 1.1-1.8 2.1-1.8 3.8 0 2.9 2.2 5.1 5.1 5.1s5.2-2.3 5.2-5.2c0-3.5-2.4-5.6-4.4-8-1.1 1.2-1.8 2.2-2.4 3.2Z" />
+            <path d="M11.2 14.7c0-1.6 1.1-2.5 2.3-3.9.5 1.2 1.2 2 1.2 3.3a2.3 2.3 0 1 1-4.5.6c0-.1 0-.1 0 0Z" />
+        </symbol>
+        <symbol id="icon-bolt" viewBox="0 0 24 24">
+            <path d="M13 3 5.8 13h5.1L10 21l8.2-10H13L13 3Z" />
+        </symbol>
+        <symbol id="icon-hourglass" viewBox="0 0 24 24">
+            <path d="M7 4h10" />
+            <path d="M7 20h10" />
+            <path d="M8 4c0 4 4 4 4 8s-4 4-4 8" />
+            <path d="M16 4c0 4-4 4-4 8s4 4 4 8" />
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M8.5 12.4 10.8 14.7 15.7 9.8" />
+        </symbol>
+        <symbol id="icon-book" viewBox="0 0 24 24">
+            <path d="M6 5.5h9a3 3 0 0 1 3 3V19a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2V7.5a2 2 0 0 1 2-2Z" />
+            <path d="M6.5 9h7.5" />
+            <path d="M6.5 12h7.5" />
+        </symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="5.5" />
+            <path d="M15.2 15.2 20 20" />
+        </symbol>
+        <symbol id="icon-cart" viewBox="0 0 24 24">
+            <path d="M5 6h2l1.5 8h8.5l2-5H8.1" />
+            <circle cx="10" cy="18" r="1" fill="currentColor" stroke="none" />
+            <circle cx="17" cy="18" r="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="icon-clock" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M12 8v4l3 2" />
+        </symbol>
+        <symbol id="icon-mail" viewBox="0 0 24 24">
+            <rect x="4.5" y="6" width="15" height="12" rx="2" />
+            <path d="M6 8l6 5 6-5" />
+        </symbol>
+        <symbol id="icon-shield" viewBox="0 0 24 24">
+            <path d="M12 4.5 18 7v4.2c0 4-2.7 7.2-6 8.8-3.3-1.6-6-4.8-6-8.8V7l6-2.5Z" />
+            <path d="M10 12.1 11.6 13.7 14.8 10.5" />
+        </symbol>
+        <symbol id="icon-pause" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M10 9v6" />
+            <path d="M14 9v6" />
+        </symbol>
+    </svg>
+
     <div class="header-row">
         <div class="title-wrap">
             <div class="brand-row">
@@ -1464,13 +1591,37 @@
     </div>
 
     <div class="tabs">
-        <button class="tab-button active" data-tab="dashboard" onclick="showTab('dashboard', this)">🎯
-            Dashboard</button>
-        <button class="tab-button" data-tab="portfolio" onclick="showTab('portfolio', this)">🛡 Portfolio</button>
-        <button class="tab-button" data-tab="mintrend" onclick="showTab('mintrend', this)">📊 Min Trend</button>
-        <a class="tab-button" href="/analysis_search">Egen analys</a>
+        <button class="tab-button active" data-tab="dashboard" onclick="showTab('dashboard', this)"><svg class="ui-icon"
+                style="color: var(--accent);" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-dashboard"></use>
+            </svg>Dashboard</button>
+        <button class="tab-button" data-tab="portfolio" onclick="showTab('portfolio', this)"><svg
+                class="portfolio-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 7V6.2C8 4.99 8.99 4 10.2 4h3.6C15.01 4 16 4.99 16 6.2V7" stroke="currentColor"
+                    stroke-width="1.9" stroke-linecap="round" />
+                <path
+                    d="M4.5 9.5C4.5 8.67 5.17 8 6 8h12c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6c-.83 0-1.5-.67-1.5-1.5v-7Z"
+                    stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" />
+                <path d="M9 12.5h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+            </svg>Portfolio</button>
+        <button class="tab-button" data-tab="mintrend" onclick="showTab('mintrend', this)"><svg class="ui-icon"
+                style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-trend-up"></use>
+            </svg>Min Trend</button>
+        <a class="tab-button" href="/analysis_search"><svg class="tab-icon-svg" viewBox="0 0 24 24" aria-hidden="true"
+                focusable="false" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.9" />
+                <path
+                    d="M9.6 9.4c.28-1.36 1.44-2.2 2.8-2.2 1.65 0 2.9 1.02 2.9 2.48 0 1.55-1.03 2.15-2.1 2.84-.9.58-1.4 1-1.4 2.02v.28"
+                    stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+                <circle cx="12" cy="17.1" r="0.95" fill="currentColor" />
+            </svg>Egen analys</a>
         {% if is_admin %}
-        <button class="tab-button" data-tab="users" onclick="showTab('users', this)">👥 Users</button>
+        <button class="tab-button" data-tab="users" onclick="showTab('users', this)"><svg class="ui-icon"
+                style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-users"></use>
+            </svg>Users</button>
         {% endif %}
     </div>
 
@@ -1561,41 +1712,65 @@
 
                 <div class="score-legend">
                     <div><b>0–20</b>: Svag trend</div>
-                    <div>💀</div>
+                    <div><svg class="ui-icon" style="color:#94a3b8;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-warning"></use>
+                        </svg></div>
                 </div>
 
                 <div class="score-legend">
                     <div><b>21–40</b>: Svag marknad</div>
-                    <div>🚧</div>
+                    <div><svg class="ui-icon" style="color:#f4b400;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-warning"></use>
+                        </svg></div>
                 </div>
 
                 <div class="score-legend">
                     <div><b>41–60</b>: Neutral</div>
-                    <div>🎯</div>
+                    <div><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-target"></use>
+                        </svg></div>
                 </div>
 
                 <div class="score-legend">
                     <div><b>61–80</b>: Stark</div>
-                    <div>🚀</div>
+                    <div><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-rocket"></use>
+                        </svg></div>
                 </div>
 
                 <div class="score-legend">
                     <div><b>81–100</b>: Mycket stark</div>
-                    <div>🔥</div>
+                    <div><svg class="ui-icon" style="color:#f87171;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-fire"></use>
+                        </svg></div>
                 </div>
 
                 <div class="status-box">
                     {% if quick_bootstrap %}
-                    <div class="status-chip loading">⚡ Snabbladdning pågår</div>
+                    <div class="status-chip loading"><svg class="ui-icon" style="color:#f4b400;" viewBox="0 0 24 24"
+                            aria-hidden="true" focusable="false">
+                            <use href="#icon-bolt"></use>
+                        </svg>Snabbladdning pågår</div>
                     <div class="status-meta">Du är inne direkt. Full analys laddas i bakgrunden.</div>
                     <div class="status-meta-countdown" id="ai-refresh-countdown"></div>
                     {% elif ai_loading %}
-                    <div class="status-chip loading">⏳ AI-scan pågår</div>
+                    <div class="status-chip loading"><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24"
+                            aria-hidden="true" focusable="false">
+                            <use href="#icon-hourglass"></use>
+                        </svg>AI-scan pågår</div>
                     <div class="status-meta">Data laddas i bakgrunden. Sidan uppdateras automatiskt tills AI-scan är
                         klar.</div>
                     <div class="status-meta-countdown" id="ai-refresh-countdown"></div>
                     {% else %}
-                    <div class="status-chip ready">✅ AI-data laddad</div>
+                    <div class="status-chip ready"><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24"
+                            aria-hidden="true" focusable="false">
+                            <use href="#icon-check"></use>
+                        </svg>AI-data laddad</div>
                     <div class="status-meta">
                         {{ ranked_count }} rekommendationer beräknade, {{ visible_count }} visas i dashboarden.
                     </div>
@@ -1634,7 +1809,10 @@
         <div class="container">
             <!-- AKTIER -->
             <div class="box">
-                <h3>🎯 AI AKTIEVAL</h3>
+                <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-target"></use>
+                    </svg>AI AKTIEVAL</h3>
 
                 {% for s in stocks %}
                 <div class="asset-box">
@@ -1849,10 +2027,18 @@
     </div>
 
 
-    <!-- ✅ PORTFOLIO TAB -->
+    <!-- PORTFOLIO TAB -->
     <div id="portfolio-tab" style="display:none;">
 
-        <h2>� Portfolio</h2>
+        <h2><svg class="portfolio-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 7V6.2C8 4.99 8.99 4 10.2 4h3.6C15.01 4 16 4.99 16 6.2V7" stroke="currentColor"
+                    stroke-width="1.9" stroke-linecap="round" />
+                <path
+                    d="M4.5 9.5C4.5 8.67 5.17 8 6 8h12c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6c-.83 0-1.5-.67-1.5-1.5v-7Z"
+                    stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" />
+                <path d="M9 12.5h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+            </svg>Portfolio</h2>
 
         <form method="POST">
 
@@ -1903,7 +2089,10 @@
         <div class="container" style="margin-top:20px;">
             <div class="box portfolio-section sell-section">
                 <div class="section-heading-row">
-                    <h3>📉 Sälj</h3>
+                    <h3><svg class="ui-icon" style="color:#f87171;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-trend-down"></use>
+                        </svg>Sälj</h3>
                     <span class="section-badge sell">Säljläge</span>
                 </div>
                 <p class="section-guide"><strong>Fokus:</strong> minska risk och ta hem vinst enligt AI-signal.</p>
@@ -1949,7 +2138,10 @@
 
             <div class="box portfolio-section buy-section">
                 <div class="section-heading-row">
-                    <h3>📈 Köp mer</h3>
+                    <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-trend-up"></use>
+                        </svg>Köp mer</h3>
                     <span class="section-badge buy">Köpläge</span>
                 </div>
                 <p class="section-guide"><strong>Fokus:</strong> öka i positioner där AI ser fortsatt uppsida.</p>
@@ -2003,7 +2195,10 @@
 
             <div class="box portfolio-section wait-section">
                 <div class="section-heading-row">
-                    <h3>⏸️ Avvakta</h3>
+                    <h3><svg class="ui-icon" style="color:#f4b400;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-pause"></use>
+                        </svg>Avvakta</h3>
                     <span class="section-badge wait">Neutral</span>
                 </div>
                 <p class="section-guide"><strong>Fokus:</strong> svag signal. köp eller sälj bara vid tydligt beslut.
@@ -2061,14 +2256,22 @@
     </div>
 
     <div id="mintrend-tab" style="display:none;">
-        <h2>📊 Min Trend</h2>
-        <div id="mintrend-loading" class="mintrend-loading">⏳ Laddar uppdaterad Min Trend-data...</div>
+        <h2><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-trend-up"></use>
+            </svg>Min Trend</h2>
+        <div id="mintrend-loading" class="mintrend-loading"><svg class="ui-icon" style="color:#9bdcff;"
+                viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-hourglass"></use>
+            </svg>Laddar uppdaterad Min Trend-data...</div>
 
         {% if min_trend_data and min_trend_data.has_data %}
         <div class="container" style="margin-top:20px;">
             <div class="mintrend-summary-grid">
                 <div class="box mintrend-definitions">
-                    <h3>📘 Definitioner</h3>
+                    <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-book"></use>
+                        </svg>Definitioner</h3>
                     <div class="asset-box">
                         <b>P/L-kurva</b><br>
                         Visar vinst/förlust över tid jämfört med vad som var investerat vid samma tillfälle.<br><br>
@@ -2085,7 +2288,10 @@
                 </div>
 
                 <div class="box mintrend-summary">
-                    <h3>🔎 Sammanfattning</h3>
+                    <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                            focusable="false">
+                            <use href="#icon-search"></use>
+                        </svg>Sammanfattning</h3>
                     <div class="asset-box">
                         Totalt investerat: <b><span id="mintrend-total-cost">{{ '%.2f' %
                                 mintrend_summary_display.total_cost }}</span> <span class="mintrend-currency-text">{{
@@ -2138,7 +2344,10 @@
             </div>
 
             <div class="box" style="flex:2 1 620px;">
-                <h3>📈 Total trend: Portfölj vs Index</h3>
+                <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-trend-up"></use>
+                    </svg>Total trend: Portfölj vs Index</h3>
                 <div style="height:320px;"><canvas id="mintrend-total-chart"></canvas></div>
                 <form method="POST" action="/dashboard" class="mintrend-control-form"
                     style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
@@ -2155,7 +2364,10 @@
 
         <div class="container" style="margin-top:20px;">
             <div class="box" style="flex:1 1 520px;">
-                <h3>🛒 Senaste köp vs Indexvärde</h3>
+                <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-cart"></use>
+                    </svg>Senaste köp vs Indexvärde</h3>
                 <div style="height:300px;"><canvas id="mintrend-recent-chart"></canvas></div>
                 <form method="POST" action="/dashboard" class="mintrend-control-form"
                     style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
@@ -2169,7 +2381,10 @@
                 </form>
             </div>
             <div class="box" style="flex:1 1 520px;">
-                <h3>💹 Vinst/förlust-kurva vs Index</h3>
+                <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-trend-up"></use>
+                    </svg>Vinst/förlust-kurva vs Index</h3>
                 <div style="height:300px;"><canvas id="mintrend-pl-chart"></canvas></div>
                 <form method="POST" action="/dashboard" class="mintrend-control-form"
                     style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
@@ -2186,7 +2401,10 @@
 
         <div class="container" style="margin-top:20px;">
             <div class="box" style="flex:1 1 100%;">
-                <h3>🕒 Indextrend över vald period</h3>
+                <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-clock"></use>
+                    </svg>Indextrend över vald period</h3>
                 <div style="height:320px;"><canvas id="mintrend-range-chart"></canvas></div>
                 <form method="POST" action="/dashboard" class="mintrend-control-form"
                     style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
@@ -2226,7 +2444,9 @@
     {% if is_admin %}
     <div id="users-tab" style="display:none;">
 
-        <h2>👥 Users</h2>
+        <h2><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-users"></use>
+            </svg>Users</h2>
 
         {% if users_msg %}
         <div class="selection-note">{{ users_msg }}</div>
@@ -2235,7 +2455,10 @@
         <div class="container" style="margin-top:20px;">
 
             <div class="box">
-                <h3>✅ Registrerade users ({{ regular_users|length }})</h3>
+                <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-check"></use>
+                    </svg>Registrerade users ({{ regular_users|length }})</h3>
                 {% for email in regular_users %}
                 <div class="asset-box">
                     <b>{{ email }}</b><br><br>
@@ -2258,7 +2481,10 @@
             </div>
 
             <div class="box">
-                <h3>📨 Nya förfrågningar ({{ pending_users|length }})</h3>
+                <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-mail"></use>
+                    </svg>Nya förfrågningar ({{ pending_users|length }})</h3>
                 {% for email in pending_users %}
                 <div class="asset-box">
                     <b>{{ email }}</b><br><br>
@@ -2276,7 +2502,10 @@
             </div>
 
             <div class="box">
-                <h3>🛡 Registrerade Admin ({{ admin_users|length }})</h3>
+                <h3><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-shield"></use>
+                    </svg>Registrerade Admin ({{ admin_users|length }})</h3>
                 {% for email in admin_users %}
                 <div class="asset-box">
                     <b>{{ email }}</b><br><br>
