@@ -514,29 +514,38 @@ def load_pending_users():
 
 
 def approve_pending_user(email):
+    """
+    Returns one of: "approved", "already_registered", "not_found".
+    """
     target = (email or "").strip().lower()
     lines = open(PENDING_FILE).readlines()
     keep = []
-    approved_hash = None
-    approved_platforms = list(DEFAULT_TRADING_PLATFORMS)
+    approved_record = None
 
     for raw in lines:
         rec = parse_user_record_line(raw)
+
+        # Preserve unknown/legacy rows instead of silently dropping them.
         if not rec:
+            keep.append(raw)
             continue
-        if rec["email"] == target and approved_hash is None:
-            approved_hash = rec["password_hash"]
-            approved_platforms = rec["platforms"]
-        else:
-            keep.append(serialize_user_record(rec))
+
+        if rec["email"] == target and approved_record is None:
+            approved_record = rec
+            continue
+
+        keep.append(serialize_user_record(rec))
 
     open(PENDING_FILE, "w").writelines(keep)
 
-    if approved_hash and not user_exists(target):
-        create_user(target, approved_hash, approved_platforms)
-        return True
+    if not approved_record:
+        return "not_found"
 
-    return False
+    if user_exists(target):
+        return "already_registered"
+
+    create_user(target, approved_record["password_hash"], approved_record["platforms"])
+    return "approved"
 
 
 def reject_pending_user(email):
@@ -2640,10 +2649,13 @@ def approve():
     if not email:
         return "❌ Missing email", 400
 
-    ok = approve_pending_user(email)
-    if ok:
+    status = approve_pending_user(email)
+    if status == "approved":
+        send_account_approved_email((email or "").strip().lower())
         return "✅ User approved!"
-    return "ℹ️ User already handled or not found in pending list."
+    if status == "already_registered":
+        return "ℹ️ User is already registered."
+    return "ℹ️ User not found in pending list."
 
 
 @app.route("/reject")
@@ -3770,6 +3782,43 @@ Neka:
     except Exception as e:
         print("Approval mail error:", e)
 
+
+def send_account_approved_email(user_email):
+    sender = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASSWORD")
+
+    if not sender or not password:
+        logger.warning("Approval confirmation mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
+        return False
+
+    body = f"""
+Hej,
+
+Ditt konto i BullEye AI har nu blivit godkänt.
+
+Du kan logga in med din registrerade email här:
+{BASE_URL}/login
+
+Välkommen!
+"""
+
+    msg = MIMEText(body)
+    msg["Subject"] = "BullEye AI - Konto godkänt"
+    msg["From"] = sender
+    msg["To"] = user_email
+
+    try:
+        server = smtplib.SMTP("smtp.office365.com", 587)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        logger.info("ACCOUNT APPROVAL MAIL SENT TO: %s", user_email)
+        return True
+    except Exception as ex:
+        logger.error("Account approval mail error for %s: %s", user_email, ex)
+        return False
+
 # ===== ALERT FUNCTION =====
 def send_alert(email, message, alert_type="GENERAL"):
     sender = os.environ.get("EMAIL_USER")
@@ -4370,8 +4419,12 @@ def dashboard():
 
         if "admin_approve" in request.form:
             target = (request.form.get("admin_approve") or "").strip()
-            if target and approve_pending_user(target):
-                session["users_msg"] = f"✅ Godkände {target}"
+            status = approve_pending_user(target) if target else "not_found"
+            if status == "approved":
+                send_account_approved_email(target.strip().lower())
+                session["users_msg"] = f"✅ Godkände {target} och skickade godkännandemail"
+            elif status == "already_registered":
+                session["users_msg"] = f"ℹ️ {target} är redan registrerad"
             else:
                 session["users_msg"] = f"ℹ️ Kunde inte godkänna {target}"
             return redirect("/dashboard?tab=users")
