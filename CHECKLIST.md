@@ -49,3 +49,54 @@
 ---
 
 Vill du att jag också automatiskt skapar en PR med dessa ändringar eller kör lint och syntaxkontroller nu?
+
+---
+
+# Checklista: Migrera från filer till Postgres på Render
+
+1. Bekräfta dependency:
+   - [x] `psycopg[binary]` finns i `requirements.txt`.
+
+2. Kontrollera filer som ska migreras:
+   - `stock_data/users.txt`
+   - `stock_data/pending.txt`
+   - `stock_data/admins.txt`
+   - `stock_data/my_trades.txt`
+   - `stock_data/user_settings.json`
+
+3. Säkerställ att schemafil och script finns:
+   - `db_schema.sql`
+   - `migrate_to_postgres.py`
+
+4. Hämta rätt URL från Render:
+   - Lokal körning i CMD/VS Code: använd **External Database URL**.
+   - Körning inne på Render Web Service: använd **Internal Database URL**.
+
+5. Sätt lokal variabel i CMD (engång per fönster):
+   - `SET "DATABASE_URL=<EXTERNAL_DATABASE_URL>"`
+
+6. Testa migrering utan skrivning:
+   - `python migrate_to_postgres.py --dry-run`
+
+7. Kör riktig migrering:
+   - `python migrate_to_postgres.py`
+
+8. Verifiera anslutning via Python (utan psql):
+   - `python -c "import os, psycopg; psycopg.connect(os.environ['DATABASE_URL']).close(); print('DB OK')"`
+
+9. Sätt `DATABASE_URL` i Render Web Service:
+   - Gå till Web Service -> Environment.
+   - Lägg in `DATABASE_URL` = **Internal Database URL**.
+   - Save changes.
+
+10. Deploya om Web Service:
+   - Kontrollera logs för uppstarts- och DB-fel.
+
+11. Funktionstest efter deploy:
+   - Login
+   - Registrering
+   - Portfolio visas korrekt
+   - Min Trend-inställningar sparas
+
+12. Behåll filer som backup tills allt verifierats:
+   - Ta inte bort textfiler förrän produktion är stabil.

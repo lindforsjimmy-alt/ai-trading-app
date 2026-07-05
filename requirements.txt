@@ -7,3 +7,4 @@ openai==1.0.0
 gunicorn
 finnhub-python
 python-dotenv>=1.0.1
+psycopg[binary]>=3.2.0

@@ -7,6 +7,10 @@ import json
 from flask import Flask, redirect, session, request, render_template, send_file, jsonify
 import os, requests, time, feedparser, math, hashlib, logging, secrets, string
 try:
+    import psycopg
+except Exception:
+    psycopg = None
+try:
     from dotenv import load_dotenv
     load_dotenv("api.env")
 except:
@@ -39,8 +43,14 @@ logger = logging.getLogger(__name__)
 # ===== CONFIG / APP SETUP =====
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
 
+def _is_configured(name):
+    return bool((os.environ.get(name) or "").strip())
+
+
 finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
-logger.info("FINNHUB KEY: %s", os.environ.get("FINNHUB_API_KEY"))
+logger.info("Config status | FINNHUB_API_KEY configured: %s", _is_configured("FINNHUB_API_KEY"))
+logger.info("Config status | OPENAI_API_KEY configured: %s", _is_configured("OPENAI_API_KEY"))
+logger.info("Config status | DATABASE_URL configured: %s", _is_configured("DATABASE_URL"))
 
 app = Flask(__name__, template_folder="Templates")
 app.permanent_session_lifetime = timedelta(hours=12)
@@ -82,6 +92,324 @@ ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
 USER_SETTINGS_FILE = "stock_data/user_settings.json"
 USER_SETTINGS_LOCK = threading.Lock()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+
+def db_enabled():
+    return bool(DATABASE_URL and psycopg is not None)
+
+
+def db_connect():
+    return psycopg.connect(DATABASE_URL)
+
+
+def db_find_user(email):
+    if not db_enabled():
+        return None
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, email, password_hash, role, status
+                    FROM users
+                    WHERE LOWER(email) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (target,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "email": row[1],
+            "password_hash": row[2],
+            "role": row[3],
+            "status": row[4],
+        }
+    except Exception as ex:
+        logger.warning("DB user lookup failed for %s: %s", target, ex)
+        return None
+
+
+def db_upsert_user(email, password_hash, status="active", role="user", platforms=None):
+    if not db_enabled():
+        return None
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+
+    normalized_platforms = normalize_trading_platform_selection(platforms)
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (email, password_hash, role, status, approved_at)
+                    VALUES (%s, %s, %s, %s, CASE WHEN %s = 'active' THEN NOW() ELSE NULL END)
+                    ON CONFLICT ((LOWER(email))) DO UPDATE
+                    SET password_hash = EXCLUDED.password_hash,
+                        role = CASE
+                            WHEN users.role = 'admin' OR EXCLUDED.role = 'admin' THEN 'admin'
+                            ELSE EXCLUDED.role
+                        END,
+                        status = EXCLUDED.status,
+                        approved_at = CASE
+                            WHEN EXCLUDED.status = 'active' THEN COALESCE(users.approved_at, NOW())
+                            ELSE users.approved_at
+                        END
+                    RETURNING id
+                    """,
+                    (target, password_hash, role, status, status),
+                )
+                user_id = cur.fetchone()[0]
+                if normalized_platforms:
+                    cur.execute("DELETE FROM user_trading_platforms WHERE user_id = %s", (user_id,))
+                    for platform_key in normalized_platforms:
+                        cur.execute(
+                            """
+                            INSERT INTO user_trading_platforms (user_id, platform_key)
+                            VALUES (%s, %s)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            (user_id, platform_key),
+                        )
+            conn.commit()
+        return user_id
+    except Exception as ex:
+        logger.warning("DB upsert user failed for %s: %s", target, ex)
+        return None
+
+
+def db_update_password(email, new_hash):
+    if not db_enabled():
+        return False
+    target = (email or "").strip().lower()
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET password_hash = %s
+                    WHERE LOWER(email) = LOWER(%s) AND status = 'active'
+                    """,
+                    (new_hash, target),
+                )
+                changed = cur.rowcount > 0
+            conn.commit()
+        return changed
+    except Exception as ex:
+        logger.warning("DB password update failed for %s: %s", target, ex)
+        return False
+
+
+def db_update_platforms(email, selected_platforms):
+    if not db_enabled():
+        return False
+    target = (email or "").strip().lower()
+    normalized = normalize_trading_platform_selection(selected_platforms)
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id FROM users
+                    WHERE LOWER(email) = LOWER(%s) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    (target,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False
+                user_id = row[0]
+                cur.execute("DELETE FROM user_trading_platforms WHERE user_id = %s", (user_id,))
+                for platform_key in normalized:
+                    cur.execute(
+                        """
+                        INSERT INTO user_trading_platforms (user_id, platform_key)
+                        VALUES (%s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (user_id, platform_key),
+                    )
+            conn.commit()
+        return True
+    except Exception as ex:
+        logger.warning("DB platform update failed for %s: %s", target, ex)
+        return False
+
+
+def db_load_settings(email):
+    if not db_enabled():
+        return {}
+    target = (email or "").strip().lower()
+    if not target:
+        return {}
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        s.amount,
+                        s.capital_currency,
+                        s.ai_strategy,
+                        s.ai_risk,
+                        s.top_n,
+                        s.priority,
+                        s.send_buy_alerts,
+                        s.send_sell_alerts,
+                        s.pf_strategy,
+                        s.pf_risk,
+                        s.mintrend_index_total,
+                        s.mintrend_index_recent,
+                        s.mintrend_index_pl,
+                        s.mintrend_index_range,
+                        s.mintrend_range,
+                        s.mintrend_currency
+                    FROM user_settings s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE LOWER(u.email) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (target,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return {}
+        return {
+            "amount": float(row[0]),
+            "capital_currency": row[1],
+            "ai_strategy": row[2],
+            "ai_risk": row[3],
+            "top_n": int(row[4]),
+            "priority": row[5],
+            "send_buy_alerts": bool(row[6]),
+            "send_sell_alerts": bool(row[7]),
+            "pf_strategy": row[8],
+            "pf_risk": row[9],
+            "mintrend_index_total": row[10],
+            "mintrend_index_recent": row[11],
+            "mintrend_index_pl": row[12],
+            "mintrend_index_range": row[13],
+            "mintrend_range": row[14],
+            "mintrend_currency": row[15],
+        }
+    except Exception as ex:
+        logger.warning("DB load settings failed for %s: %s", target, ex)
+        return {}
+
+
+def db_save_settings(email, updates):
+    if not db_enabled():
+        return False
+    target = (email or "").strip().lower()
+    if not target:
+        return False
+
+    merged = {
+        "amount": 10000,
+        "capital_currency": "SEK",
+        "ai_strategy": "short",
+        "ai_risk": "medium",
+        "top_n": 5,
+        "priority": "mix",
+        "send_buy_alerts": False,
+        "send_sell_alerts": False,
+        "pf_strategy": "short",
+        "pf_risk": "medium",
+        "mintrend_index_total": "STANDARD",
+        "mintrend_index_recent": "STANDARD",
+        "mintrend_index_pl": "STANDARD",
+        "mintrend_index_range": "STANDARD",
+        "mintrend_range": "1Y",
+        "mintrend_currency": "USD",
+    }
+    merged.update(db_load_settings(target))
+    merged.update(updates or {})
+
+    currency = str(merged.get("capital_currency", "SEK")).upper()
+    if currency not in {"SEK", "USD", "EUR"}:
+        currency = "SEK"
+    mt_currency = str(merged.get("mintrend_currency", "USD")).upper()
+    if mt_currency not in {"SEK", "USD", "EUR"}:
+        mt_currency = "USD"
+
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM users WHERE LOWER(email)=LOWER(%s) LIMIT 1",
+                    (target,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False
+                user_id = row[0]
+                cur.execute(
+                    """
+                    INSERT INTO user_settings (
+                        user_id, amount, capital_currency, ai_strategy, ai_risk, top_n, priority,
+                        send_buy_alerts, send_sell_alerts, pf_strategy, pf_risk,
+                        mintrend_index_total, mintrend_index_recent, mintrend_index_pl, mintrend_index_range,
+                        mintrend_range, mintrend_currency, updated_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, NOW()
+                    )
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET amount = EXCLUDED.amount,
+                        capital_currency = EXCLUDED.capital_currency,
+                        ai_strategy = EXCLUDED.ai_strategy,
+                        ai_risk = EXCLUDED.ai_risk,
+                        top_n = EXCLUDED.top_n,
+                        priority = EXCLUDED.priority,
+                        send_buy_alerts = EXCLUDED.send_buy_alerts,
+                        send_sell_alerts = EXCLUDED.send_sell_alerts,
+                        pf_strategy = EXCLUDED.pf_strategy,
+                        pf_risk = EXCLUDED.pf_risk,
+                        mintrend_index_total = EXCLUDED.mintrend_index_total,
+                        mintrend_index_recent = EXCLUDED.mintrend_index_recent,
+                        mintrend_index_pl = EXCLUDED.mintrend_index_pl,
+                        mintrend_index_range = EXCLUDED.mintrend_index_range,
+                        mintrend_range = EXCLUDED.mintrend_range,
+                        mintrend_currency = EXCLUDED.mintrend_currency,
+                        updated_at = NOW()
+                    """,
+                    (
+                        user_id,
+                        float(merged.get("amount", 10000) or 10000),
+                        currency,
+                        str(merged.get("ai_strategy", "short")),
+                        str(merged.get("ai_risk", "medium")),
+                        int(merged.get("top_n", 5) or 5),
+                        str(merged.get("priority", "mix")),
+                        bool(merged.get("send_buy_alerts", False)),
+                        bool(merged.get("send_sell_alerts", False)),
+                        str(merged.get("pf_strategy", "short")),
+                        str(merged.get("pf_risk", "medium")),
+                        str(merged.get("mintrend_index_total", "STANDARD")).upper(),
+                        str(merged.get("mintrend_index_recent", "STANDARD")).upper(),
+                        str(merged.get("mintrend_index_pl", "STANDARD")).upper(),
+                        str(merged.get("mintrend_index_range", "STANDARD")).upper(),
+                        str(merged.get("mintrend_range", "1Y")).upper(),
+                        mt_currency,
+                    ),
+                )
+            conn.commit()
+        return True
+    except Exception as ex:
+        logger.warning("DB save settings failed for %s: %s", target, ex)
+        return False
 
 MIN_TREND_INDEX_OPTIONS = {
     "OMX": {"symbol": "^OMX", "name": "OMX Stockholm"},
@@ -155,6 +483,11 @@ if not os.path.exists(USER_SETTINGS_FILE):
 
 
 def load_user_settings(email):
+    if db_enabled():
+        db_data = db_load_settings(email)
+        if db_data:
+            return db_data
+
     target = (email or "").strip().lower()
     if not target:
         return {}
@@ -175,6 +508,9 @@ def load_user_settings(email):
 def save_user_settings(email, updates):
     target = (email or "").strip().lower()
     if not target or not isinstance(updates, dict):
+        return
+
+    if db_enabled() and db_save_settings(target, updates):
         return
 
     with USER_SETTINGS_LOCK:
@@ -322,6 +658,10 @@ def parse_user_record_line(raw_line):
 
 
 def pending_user_exists(email):
+    if db_enabled():
+        rec = db_find_user(email)
+        return bool(rec and rec.get("status") == "pending")
+
     target = (email or "").strip().lower()
     with open(PENDING_FILE) as f:
         for raw in f:
@@ -425,6 +765,9 @@ def dedupe_user_records_file(file_path):
 
 
 def run_auth_data_self_heal():
+    if db_enabled():
+        return
+
     removed_users = dedupe_user_records_file(USERS_FILE)
     removed_pending = dedupe_user_records_file(PENDING_FILE)
     if removed_users or removed_pending:
@@ -437,6 +780,11 @@ def run_auth_data_self_heal():
 
 def create_pending_user(email, password_hash, platforms=None):
     email = (email or "").strip().lower()
+    if db_enabled():
+        role = "admin" if email in ADMIN_EMAILS else "user"
+        db_upsert_user(email, password_hash, status="pending", role=role, platforms=platforms)
+        return
+
     rec = {
         "email": email,
         "password_hash": password_hash,
@@ -448,6 +796,11 @@ def create_pending_user(email, password_hash, platforms=None):
 
 def create_user(email, password_hash, platforms=None):
     email = (email or "").strip().lower()
+    if db_enabled():
+        role = "admin" if email in ADMIN_EMAILS else "user"
+        db_upsert_user(email, password_hash, status="active", role=role, platforms=platforms)
+        return
+
     rec = {
         "email": email,
         "password_hash": password_hash,
@@ -458,6 +811,20 @@ def create_user(email, password_hash, platforms=None):
 
 
 def load_extra_admin_emails():
+    if db_enabled():
+        admins = set()
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT email FROM users WHERE role = 'admin'")
+                    for row in cur.fetchall():
+                        email = (row[0] or "").strip().lower()
+                        if email:
+                            admins.add(email)
+        except Exception as ex:
+            logger.warning("DB load admins failed: %s", ex)
+        return admins
+
     admins = set()
     for raw in open(ADMINS_FILE).readlines():
         email = raw.strip().lower()
@@ -470,6 +837,18 @@ def add_admin_email(email):
     target = (email or "").strip().lower()
     if not target:
         return False
+    if db_enabled():
+        existing = db_find_user(target)
+        password_hash = existing["password_hash"] if existing else "ADMIN_ONLY_PLACEHOLDER_HASH"
+        user_id = db_upsert_user(
+            target,
+            password_hash,
+            status="active",
+            role="admin",
+            platforms=get_user_trading_platforms(target),
+        )
+        return bool(user_id)
+
     if target in ADMIN_EMAILS or target in load_extra_admin_emails():
         return False
     with open(ADMINS_FILE, "a") as f:
@@ -482,6 +861,12 @@ def is_admin_email(email):
     return target in ADMIN_EMAILS or target in load_extra_admin_emails()
 
 def check_user(email, password):
+    if db_enabled():
+        rec = db_find_user(email)
+        if not rec:
+            return False
+        return rec.get("status") == "active" and rec.get("password_hash") == hash_password(password)
+
     target = (email or "").strip().lower()
     with open(USERS_FILE) as f:
         for l in f:
@@ -493,6 +878,10 @@ def check_user(email, password):
         return False
 
 def user_exists(email):
+    if db_enabled():
+        rec = db_find_user(email)
+        return bool(rec and rec.get("status") == "active")
+
     target = (email or "").strip().lower()
     with open(USERS_FILE) as f:
         for l in f:
@@ -503,6 +892,26 @@ def user_exists(email):
 
 
 def get_user_trading_platforms(email):
+    if db_enabled():
+        target = (email or "").strip().lower()
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT p.platform_key
+                        FROM user_trading_platforms p
+                        JOIN users u ON u.id = p.user_id
+                        WHERE LOWER(u.email) = LOWER(%s)
+                        ORDER BY p.platform_key
+                        """,
+                        (target,),
+                    )
+                    values = [row[0] for row in cur.fetchall()]
+            return normalize_trading_platform_selection(values)
+        except Exception as ex:
+            logger.warning("DB load platforms failed for %s: %s", target, ex)
+
     target = (email or "").strip().lower()
     with open(USERS_FILE) as f:
         for raw in f:
@@ -513,6 +922,15 @@ def get_user_trading_platforms(email):
 
 
 def load_registered_users():
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT email FROM users WHERE status='active' ORDER BY email")
+                    return [row[0] for row in cur.fetchall() if row and row[0]]
+        except Exception as ex:
+            logger.warning("DB load registered users failed: %s", ex)
+
     users = []
     seen = set()
     for raw in open(USERS_FILE).readlines():
@@ -539,6 +957,15 @@ def split_registered_users(users):
 
 
 def load_pending_users():
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT email FROM users WHERE status='pending' ORDER BY email")
+                    return [row[0] for row in cur.fetchall() if row and row[0]]
+        except Exception as ex:
+            logger.warning("DB load pending users failed: %s", ex)
+
     users = []
     seen = set()
     for raw in open(PENDING_FILE).readlines():
@@ -558,6 +985,30 @@ def approve_pending_user(email):
     Returns one of: "approved", "already_registered", "not_found".
     """
     target = (email or "").strip().lower()
+    if db_enabled():
+        rec = db_find_user(target)
+        if not rec:
+            return "not_found"
+        if rec.get("status") == "active":
+            return "already_registered"
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE users
+                        SET status='active', approved_at=NOW()
+                        WHERE LOWER(email)=LOWER(%s) AND status='pending'
+                        """,
+                        (target,),
+                    )
+                    changed = cur.rowcount > 0
+                conn.commit()
+            return "approved" if changed else "not_found"
+        except Exception as ex:
+            logger.warning("DB approve pending failed for %s: %s", target, ex)
+            return "not_found"
+
     lines = open(PENDING_FILE).readlines()
     keep = []
     approved_record = None
@@ -590,6 +1041,21 @@ def approve_pending_user(email):
 
 def reject_pending_user(email):
     target = (email or "").strip().lower()
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM users WHERE LOWER(email)=LOWER(%s) AND status='pending'",
+                        (target,),
+                    )
+                    changed = cur.rowcount > 0
+                conn.commit()
+            return changed
+        except Exception as ex:
+            logger.warning("DB reject pending failed for %s: %s", target, ex)
+            return False
+
     lines = open(PENDING_FILE).readlines()
     keep = []
     changed = False
@@ -609,6 +1075,21 @@ def reject_pending_user(email):
 
 def delete_registered_user(email):
     target = (email or "").strip().lower()
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM users WHERE LOWER(email)=LOWER(%s) AND status='active'",
+                        (target,),
+                    )
+                    changed = cur.rowcount > 0
+                conn.commit()
+            return changed
+        except Exception as ex:
+            logger.warning("DB delete user failed for %s: %s", target, ex)
+            return False
+
     lines = open(USERS_FILE).readlines()
     keep = []
     changed = False
@@ -632,6 +1113,9 @@ def generate_temp_password(length=7):
 
 
 def build_updated_user_lines(email, new_hash):
+    if db_enabled():
+        return db_update_password(email, new_hash), None
+
     target = (email or "").strip().lower()
     updated = False
     lines = open(USERS_FILE).readlines()
@@ -652,6 +1136,9 @@ def build_updated_user_lines(email, new_hash):
 
 
 def build_updated_platform_lines(email, selected_platforms):
+    if db_enabled():
+        return db_update_platforms(email, selected_platforms), None
+
     target = (email or "").strip().lower()
     updated = False
     lines = open(USERS_FILE).readlines()
@@ -2264,6 +2751,41 @@ def apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=False, do
 # ===== DATA =====
 
 def portfolio(user):
+    if db_enabled():
+        target = (user or "").strip().lower()
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT t.ticker, SUM(t.qty) AS total_qty, SUM(t.qty * t.price) AS total_cost
+                        FROM trades t
+                        JOIN users u ON u.id = t.user_id
+                        WHERE LOWER(u.email) = LOWER(%s)
+                          AND t.side = 'BUY'
+                        GROUP BY t.ticker
+                        """,
+                        (target,),
+                    )
+                    rows = cur.fetchall()
+            result = []
+            for ticker, qty_val, cost_val in rows:
+                qty = int(float(qty_val or 0))
+                if qty <= 0:
+                    continue
+                total_cost = float(cost_val or 0)
+                avg_price = round(total_cost / qty, 2) if qty else 0
+                result.append({
+                    "t": ticker,
+                    "symbol": ticker,
+                    "display_name": get_asset_display_name(ticker),
+                    "qty": qty,
+                    "avg_price": avg_price,
+                })
+            return result
+        except Exception as ex:
+            logger.warning("DB portfolio load failed for %s: %s", target, ex)
+
     data = {}
 
     with open(DATA_FILE) as f:
@@ -2309,6 +2831,39 @@ def portfolio(user):
 
 
 def load_user_trade_rows(user):
+    if db_enabled():
+        target = (user or "").strip().lower()
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT t.ticker, t.qty, t.price
+                        FROM trades t
+                        JOIN users u ON u.id = t.user_id
+                        WHERE LOWER(u.email) = LOWER(%s)
+                          AND t.side = 'BUY'
+                        ORDER BY t.id
+                        """,
+                        (target,),
+                    )
+                    rows = cur.fetchall()
+            out = []
+            for ticker, qty_raw, price_raw in rows:
+                qty = int(float(qty_raw or 0))
+                price = float(price_raw or 0)
+                if qty <= 0 or price <= 0:
+                    continue
+                out.append({
+                    "ticker": (ticker or "").strip().upper(),
+                    "qty": qty,
+                    "buy_price": price,
+                    "cost": qty * price,
+                })
+            return out
+        except Exception as ex:
+            logger.warning("DB trade row load failed for %s: %s", target, ex)
+
     target = (user or "").strip().lower()
     rows = []
 
@@ -3351,7 +3906,8 @@ def change_password():
 
             updated, new_lines = build_updated_user_lines(user, new_hash)
             if updated:
-                open(USERS_FILE, "w").writelines(new_lines)
+                if new_lines is not None:
+                    open(USERS_FILE, "w").writelines(new_lines)
                 msg = "✅ Password updated successfully"
             else:
                 msg = "❌ Kunde inte uppdatera lösenord"
@@ -3393,7 +3949,8 @@ def change_trading_platform():
         else:
             updated, new_lines = build_updated_platform_lines(user, final_selection)
             if updated:
-                open(USERS_FILE, "w").writelines(new_lines)
+                if new_lines is not None:
+                    open(USERS_FILE, "w").writelines(new_lines)
                 # Match login flow: render dashboard immediately and finish heavy work in the background.
                 session["fast_login_bootstrap"] = True
                 return redirect("/dashboard?tab=dashboard")
@@ -3569,7 +4126,8 @@ def forgot():
             else:
                 ok, err = send_reset_email(email, new_password)
                 if ok:
-                    open(USERS_FILE, "w").writelines(new_lines)
+                    if new_lines is not None:
+                        open(USERS_FILE, "w").writelines(new_lines)
                     msg = f"✅ Mail skickat till {email}. Ett nytt lösenord på 7 tecken har genererats."
                 else:
                     msg = f"❌ {err}"
@@ -4516,7 +5074,8 @@ def dashboard():
 
             ok, err = send_reset_email(target, new_password)
             if ok:
-                open(USERS_FILE, "w").writelines(new_lines)
+                if new_lines is not None:
+                    open(USERS_FILE, "w").writelines(new_lines)
                 session["users_msg"] = f"✅ Nytt lösenord skickat till {target}"
             else:
                 session["users_msg"] = f"❌ Kunde inte skicka lösenordsmail: {err}"

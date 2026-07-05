@@ -1,9 +1,39 @@
 # Delad trading-logik för CLI och webbapp
 # Kommentarer på svenska enligt projektregler
 
+import os
+
+try:
+    import psycopg
+except Exception:
+    psycopg = None
+
 import yfinance as yf
 
 FILE = "stock_data/my_trades.txt"
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+
+def db_enabled():
+    return bool(DATABASE_URL and psycopg is not None)
+
+
+def db_connect():
+    return psycopg.connect(DATABASE_URL)
+
+
+def get_user_id(email):
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM users WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                (target,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
 
 
 def price(t):
@@ -93,12 +123,63 @@ def signal(t):
 
 def buy(user, t, qty, price_val):
     """Registrerar köp i `stock_data/my_trades.txt`."""
+    if db_enabled():
+        user_id = get_user_id(user)
+        if user_id is not None:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO trades (user_id, ticker, side, qty, price)
+                        VALUES (%s, %s, 'BUY', %s, %s)
+                        """,
+                        (user_id, str(t).upper(), float(qty), float(price_val)),
+                    )
+                conn.commit()
+            return
+
     with open(FILE, "a") as f:
         f.write(f"{user}|{t}|{qty}|{price_val}\n")
 
 
 def sell(user, t, qty):
     """Utför en enkel sell genom att uppdatera poster i trades-filen."""
+    if db_enabled():
+        user_id = get_user_id(user)
+        if user_id is not None:
+            remaining = int(float(qty))
+            if remaining <= 0:
+                return
+
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, qty
+                        FROM trades
+                        WHERE user_id = %s AND ticker = %s AND side = 'BUY'
+                        ORDER BY id
+                        """,
+                        (user_id, str(t).upper()),
+                    )
+                    rows = cur.fetchall()
+
+                    for trade_id, trade_qty in rows:
+                        if remaining <= 0:
+                            break
+                        current_qty = int(float(trade_qty))
+                        if current_qty <= remaining:
+                            cur.execute("DELETE FROM trades WHERE id = %s", (trade_id,))
+                            remaining -= current_qty
+                        else:
+                            cur.execute(
+                                "UPDATE trades SET qty = %s WHERE id = %s",
+                                (current_qty - remaining, trade_id),
+                            )
+                            remaining = 0
+                conn.commit()
+            return
+
     lines = open(FILE).readlines()
     new = []
     for l in lines:
