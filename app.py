@@ -3281,9 +3281,9 @@ def approve():
     if status == "approved":
         ok, err = send_account_approved_email((email or "").strip().lower())
         if ok:
-            return "✅ User approved! Confirmation email sent."
+            return "✅ User approved! Confirmation message sent."
         logger.warning("Approval completed but confirmation mail failed for %s: %s", email, err)
-        return "✅ User approved! Confirmation email failed."
+        return "✅ User approved! Confirmation message failed."
     if status == "already_registered":
         return "ℹ️ User is already registered."
     return "ℹ️ User not found in pending list."
@@ -3626,18 +3626,21 @@ def register_account():
             admin_mail_ok, admin_mail_err = send_approval_email(entered_email, request_base_url)
             user_mail_ok, user_mail_err = send_registration_received_email(entered_email, request_base_url)
 
-            if admin_mail_ok and user_mail_ok:
-                msg = "✅ Ansökan skickad. Bekräftelsemail är skickat och du får ett nytt mail när kontot blir godkänt."
+            if not is_email_enabled():
+                msg = "✅ Ansökan skickad. Vi återkommer när kontot har granskats."
+                msg_class = "msg-success"
+            elif admin_mail_ok and user_mail_ok:
+                msg = "✅ Ansökan skickad. Bekräftelsemeddelande är skickat och du får ett nytt meddelande när kontot blir godkänt."
                 msg_class = "msg-success"
             elif admin_mail_ok and not user_mail_ok:
-                msg = f"✅ Ansökan skickad. Admin-notis skickades, men bekräftelsemail till dig misslyckades ({user_mail_err})."
+                msg = f"✅ Ansökan skickad. Admin-notis skickades, men bekräftelsemeddelande till dig misslyckades ({user_mail_err})."
                 msg_class = "msg-warn"
             elif not admin_mail_ok and user_mail_ok:
-                msg = f"✅ Ansökan skickad. Bekräftelsemail till dig skickades, men admin-notis misslyckades ({admin_mail_err})."
+                msg = f"✅ Ansökan skickad. Bekräftelsemeddelande till dig skickades, men admin-notis misslyckades ({admin_mail_err})."
                 msg_class = "msg-warn"
             else:
                 msg = (
-                    "✅ Ansökan skickad. Mailutskick misslyckades just nu "
+                    "✅ Ansökan skickad. Meddelandeutskick misslyckades just nu "
                     f"(admin: {admin_mail_err}, bekräftelse: {user_mail_err}). "
                     "Förfrågan finns ändå sparad och kan godkännas manuellt."
                 )
@@ -4356,7 +4359,7 @@ def forgot():
                 if ok:
                     if new_lines is not None:
                         open(USERS_FILE, "w").writelines(new_lines)
-                    msg = f"✅ Mail skickat till {email}. Ett nytt lösenord på 7 tecken har genererats."
+                    msg = f"✅ Meddelande skickat till {email}. Ett nytt lösenord på 7 tecken har genererats."
                 else:
                     msg = f"❌ {err}"
 
@@ -4912,14 +4915,14 @@ def send_alert(email, message, alert_type="GENERAL"):
 def send_reset_email(email, new_password):
     if not is_email_enabled():
         logger.warning("Reset mail blocked because EMAIL_ENABLED is disabled")
-        return False, "Email-funktionen är tillfälligt avstängd (EMAIL_ENABLED=0). Kontakta admin."
+        return False, "Meddelandefunktionen är tillfälligt avstängd (EMAIL_ENABLED=0). Kontakta admin."
 
     sender = get_email_user()
     password = get_email_password()
 
     if not sender or not password:
         logger.warning("Reset mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
-        return False, "Email är inte konfigurerad på servern (EMAIL_USER/EMAIL_PASSWORD saknas)."
+        return False, "Meddelandetjänsten är inte konfigurerad på servern (EMAIL_USER/EMAIL_PASSWORD saknas)."
 
     body = f"""
 Hej,
@@ -4954,7 +4957,7 @@ Logga in och byt lösenord direkt efter inloggning.
             _email_hint(get_email_user()),
             e,
         )
-        return False, f"Kunde inte skicka email: {e}"
+        return False, f"Kunde inte skicka meddelande: {e}"
 
 # ===== UI HELPERS =====
 def get_buy_link(t):
@@ -5493,9 +5496,9 @@ def dashboard():
             if status == "approved":
                 ok, err = send_account_approved_email(target.strip().lower())
                 if ok:
-                    session["users_msg"] = f"✅ Godkände {target} och skickade godkännandemail"
+                    session["users_msg"] = f"✅ Godkände {target} och skickade godkännandemeddelande"
                 else:
-                    session["users_msg"] = f"✅ Godkände {target}, men kunde inte skicka godkännandemail ({err})"
+                    session["users_msg"] = f"✅ Godkände {target}, men kunde inte skicka godkännandemeddelande ({err})"
             elif status == "already_registered":
                 session["users_msg"] = f"ℹ️ {target} är redan registrerad"
             else:
@@ -5540,7 +5543,7 @@ def dashboard():
                     open(USERS_FILE, "w").writelines(new_lines)
                 session["users_msg"] = f"✅ Nytt lösenord skickat till {target}"
             else:
-                session["users_msg"] = f"❌ Kunde inte skicka lösenordsmail: {err}"
+                session["users_msg"] = f"❌ Kunde inte skicka lösenordsmeddelande: {err}"
             return redirect("/dashboard?tab=users")
 
     if request.method == "POST" and (
