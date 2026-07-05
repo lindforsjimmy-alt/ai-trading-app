@@ -1781,22 +1781,35 @@ def extract_close_prices(hist_data):
     return [float(price) for price in prices if isinstance(price, (int, float)) and price > 0]
 
 
+def get_analysis_intent_meta(raw_action):
+    action = (raw_action or "kopa").strip().lower()
+    meta = {
+        "kopa": {
+            "label": "Funderar på att köpa",
+            "short_label": "Köp",
+        },
+        "sjalja_innehav": {
+            "label": "Sälja innehav på handelsplattform",
+            "short_label": "Sälj innehav",
+        },
+        "kopa_mer": {
+            "label": "Funderar på att köpa mer på handelsplattform",
+            "short_label": "Köp mer",
+        },
+    }
+    return action, meta.get(action, meta["kopa"])
+
+
 def build_manual_analysis_row(raw_query, requested_action):
     query = (raw_query or "").strip()
-    action = (requested_action or "avvakta").strip().lower()
-    action_labels = {
-        "buy": "Köp",
-        "sell": "Sälj",
-        "hold": "Avvakta",
-        "avvakta": "Avvakta",
-    }
-    requested_label = action_labels.get(action, "Avvakta")
+    action, action_meta = get_analysis_intent_meta(requested_action)
+    requested_label = action_meta["label"]
 
     if not query:
         return {
             "query": "",
             "requested_action": requested_label,
-            "requested_action_value": action if action in action_labels else "avvakta",
+            "requested_action_value": action,
             "status": "empty",
         }
 
@@ -1805,7 +1818,7 @@ def build_manual_analysis_row(raw_query, requested_action):
         return {
             "query": query,
             "requested_action": requested_label,
-            "requested_action_value": action if action in action_labels else "avvakta",
+            "requested_action_value": action,
             "status": "not_found",
             "message": "Hittade ingen träff för den här raden. Testa ticker eller företagsnamn.",
         }
@@ -1817,7 +1830,7 @@ def build_manual_analysis_row(raw_query, requested_action):
             "symbol": symbol,
             "display_name": get_asset_display_name(symbol) or symbol,
             "requested_action": requested_label,
-            "requested_action_value": action if action in action_labels else "avvakta",
+            "requested_action_value": action,
             "status": "no_price",
             "message": "Kunde inte hämta prisdata för den här tillgången just nu.",
         }
@@ -1852,19 +1865,36 @@ def build_manual_analysis_row(raw_query, requested_action):
         asset["trigger_score"] = max(0, news_score)
         analysis_html = generate_watch_analysis(asset)
 
-    signal_to_action = {
-        "KÖP": "Köp",
-        "SÄLJ": "Sälj",
-        "AVVAKTA": "Avvakta",
-    }
-    recommended_action = signal_to_action.get(signal, "Avvakta")
-
-    if requested_label == recommended_action:
-        alignment = "Din önskade riktning matchar AI-signalens huvudspår."
-    elif requested_label == "Avvakta":
-        alignment = "Du har markerat avvakta, vilket passar när signalen är osäker eller svag."
+    if action == "kopa":
+        if signal == "KÖP":
+            ai_recommendation = "Funderar på att köpa"
+            alignment = "AI ser stöd för ett köp på den här nivån."
+        elif signal == "SÄLJ":
+            ai_recommendation = "Avvakta med att köpa"
+            alignment = "AI avråder från köp just nu eftersom signalen lutar svagare."
+        else:
+            ai_recommendation = "Funderar på att köpa, men signalen är svag"
+            alignment = "AI vill se starkare bekräftelse innan köp."
+    elif action == "sjalja_innehav":
+        if signal == "SÄLJ":
+            ai_recommendation = "Sälja innehav på handelsplattform"
+            alignment = "AI ser stöd för att minska eller sälja innehavet."
+        elif signal == "KÖP":
+            ai_recommendation = "Avvakta med försäljning"
+            alignment = "AI ser inte tillräckligt svag bild för att sälja nu."
+        else:
+            ai_recommendation = "Sälja innehav kan övervägas, men signalen är neutral"
+            alignment = "AI vill se tydligare svaghet innan försäljning."
     else:
-        alignment = "AI-signal och önskad riktning pekar åt olika håll, så raden bör granskas manuellt."
+        if signal == "KÖP":
+            ai_recommendation = "Funderar på att köpa mer på handelsplattform"
+            alignment = "AI ser stöd för att öka innehavet."
+        elif signal == "SÄLJ":
+            ai_recommendation = "Avvakta med att köpa mer"
+            alignment = "AI avråder från att öka positionen nu."
+        else:
+            ai_recommendation = "Köpa mer saknar tydligt stöd just nu"
+            alignment = "AI vill se starkare momentum innan du ökar."
 
     display_name = get_asset_display_name(symbol) or symbol
 
@@ -1873,7 +1903,7 @@ def build_manual_analysis_row(raw_query, requested_action):
         "symbol": symbol,
         "display_name": display_name,
         "requested_action": requested_label,
-        "requested_action_value": action if action in action_labels else "avvakta",
+        "requested_action_value": action,
         "status": "ok",
         "price": price,
         "volume": volume,
@@ -1885,7 +1915,7 @@ def build_manual_analysis_row(raw_query, requested_action):
         "trigger_score": max(0.0, float(news_score or 0)),
         "alignment": alignment,
         "analysis_html": analysis_html,
-        "recommended_action": recommended_action,
+        "recommended_action": ai_recommendation,
         "recommended_qty": 0,
         "recommended_usd": 0.0,
         "recommended_sek": 0.0,
@@ -6568,7 +6598,7 @@ def analysis_search():
     analysis_rows = []
     for idx in range(1, row_count + 1):
         input_value = request.form.get(f"analysis_input_{idx}", "") if request.method == "POST" else ""
-        action_value = request.form.get(f"analysis_action_{idx}", "avvakta") if request.method == "POST" else "avvakta"
+        action_value = request.form.get(f"analysis_action_{idx}", "kopa") if request.method == "POST" else "kopa"
         result = build_manual_analysis_row(input_value, action_value)
         result["index"] = idx
         analysis_rows.append(result)

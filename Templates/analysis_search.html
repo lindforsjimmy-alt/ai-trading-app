@@ -562,12 +562,12 @@
                             <input type="text" name="analysis_input_{{ row.index }}" value="{{ row.query }}"
                                 placeholder="Skriv ticker eller bolagsnamn">
                             <select name="analysis_action_{{ row.index }}">
-                                <option value="avvakta" {% if row.requested_action_value=='avvakta' %}selected{% endif
-                                    %}>Avvakta</option>
-                                <option value="buy" {% if row.requested_action_value=='buy' %}selected{% endif %}>Köp
-                                </option>
-                                <option value="sell" {% if row.requested_action_value=='sell' %}selected{% endif %}>Sälj
-                                </option>
+                                <option value="kopa" {% if row.requested_action_value=='kopa' %}selected{% endif %}>
+                                    Funderar på att köpa</option>
+                                <option value="sjalja_innehav" {% if row.requested_action_value=='sjalja_innehav'
+                                    %}selected{% endif %}>Sälja innehav på handelsplattform</option>
+                                <option value="kopa_mer" {% if row.requested_action_value=='kopa_mer' %}selected{% endif
+                                    %}>Funderar på att köpa mer på handelsplattform</option>
                             </select>
                         </div>
                         {% endfor %}
@@ -602,14 +602,14 @@
                         <div class="result-head">
                             <div>
                                 <h3 class="result-title">Rad {{ row.index }} · {{ row.display_name or row.query }}</h3>
-                                <p class="result-subtitle">Önskad riktning: {{ row.requested_action }}</p>
+                                <p class="result-subtitle">Din fundering: {{ row.requested_action }}</p>
                             </div>
                             <div class="pill-row">
                                 {% if row.status == 'ok' %}
                                 <span class="pill good">{{ row.signal }}</span>
                                 <span class="pill">Score {{ row.score }}</span>
                                 <span class="pill">Pris {{ '%.2f'|format(row.price) }}</span>
-                                <span class="pill">Rekommenderat: {{ row.recommended_action }}</span>
+                                <span class="pill">AI-råd: {{ row.recommended_action }}</span>
                                 {% elif row.status == 'not_found' %}
                                 <span class="pill bad">Ingen träff</span>
                                 {% else %}
@@ -633,7 +633,7 @@
                                 <span class="meta-value">{{ row.news_score }}</span>
                             </div>
                             <div class="meta-box">
-                                <span class="meta-label">Matchning</span>
+                                <span class="meta-label">AI-råd</span>
                                 <span class="meta-value">{{ row.alignment }}</span>
                             </div>
                             <div class="meta-box">
@@ -724,7 +724,7 @@
 
             const cards = renderableRows.map((row) => {
                 const title = escapeHtml(row.display_name || row.query || 'Okänt');
-                const requestedAction = escapeHtml(row.requested_action || 'Avvakta');
+                const requestedAction = escapeHtml(row.requested_action || 'Funderar på att köpa');
 
                 if (row.status === 'ok') {
                     const reason = escapeHtml(row.reason || '').replace(/\n/g, '<br>');
@@ -745,13 +745,13 @@
                             <div class="result-head">
                                 <div>
                                     <h3 class="result-title">Rad ${row.index} · ${title}</h3>
-                                    <p class="result-subtitle">Önskad riktning: ${requestedAction}</p>
+                                    <p class="result-subtitle">Din fundering: ${requestedAction}</p>
                                 </div>
                                 <div class="pill-row">
                                     <span class="pill good">${signal}</span>
                                     <span class="pill">Score ${score}</span>
                                     <span class="pill">Pris ${price}</span>
-                                    <span class="pill">Rekommenderat: ${recommendedAction}</span>
+                                    <span class="pill">AI-råd: ${recommendedAction}</span>
                                 </div>
                             </div>
 
@@ -803,7 +803,7 @@
                         <div class="result-head">
                             <div>
                                 <h3 class="result-title">Rad ${row.index} · ${title}</h3>
-                                <p class="result-subtitle">Önskad riktning: ${requestedAction}</p>
+                                <p class="result-subtitle">Din fundering: ${requestedAction}</p>
                             </div>
                             <div class="pill-row">
                                 ${row.status === 'not_found' ? '<span class="pill bad">Ingen träff</span>' : '<span class="pill warn">Prisdata saknas</span>'}
@@ -863,7 +863,7 @@
                 if (analysisResults) {
                     analysisResults.innerHTML = `<div class="status-box bad">${escapeHtml(error.message || 'Något gick fel.')}</div>`;
                 }
-                setBuyAllState(false);
+                setBuyAllState(Boolean(analysisResults && analysisResults.querySelector('.buy-row-button')));
             } finally {
                 if (analysisButton) {
                     analysisButton.disabled = false;

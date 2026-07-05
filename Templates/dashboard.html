@@ -1397,7 +1397,6 @@
                     <div class="header-actions">
                         <a class="top-action" href="/change_trading_platform">Ändra Handelsplattform</a>
                         <a class="top-action" href="/change_password">Byt lösenord</a>
-                        <a class="top-action" href="/analysis_search">Sök analys</a>
                         <form method="POST" action="/delete_account" style="margin:0;">
                             <button class="top-action logout" type="submit"
                                 onclick="return confirm('Är du säker på att du vill avregistrera konto?');">Avregistrera
@@ -1469,6 +1468,7 @@
             Dashboard</button>
         <button class="tab-button" data-tab="portfolio" onclick="showTab('portfolio', this)">🛡 Portfolio</button>
         <button class="tab-button" data-tab="mintrend" onclick="showTab('mintrend', this)">📊 Min Trend</button>
+        <a class="tab-button" href="/analysis_search">Egen analys</a>
         {% if is_admin %}
         <button class="tab-button" data-tab="users" onclick="showTab('users', this)">👥 Users</button>
         {% endif %}
