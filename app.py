@@ -59,12 +59,24 @@ def _email_hint(value):
     return f"{masked_local}@{domain}"
 
 
+def is_email_enabled():
+    raw = (os.environ.get("EMAIL_ENABLED") or "1").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def is_alerts_enabled():
+    raw = (os.environ.get("ALERTS_ENABLED") or "1").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 finnhub_client = finnhub.Client(api_key=os.environ.get("FINNHUB_API_KEY"))
 logger.info("Config status | FINNHUB_API_KEY configured: %s", _is_configured("FINNHUB_API_KEY"))
 logger.info("Config status | OPENAI_API_KEY configured: %s", _is_configured("OPENAI_API_KEY"))
 logger.info("Config status | DATABASE_URL configured: %s", _is_configured("DATABASE_URL"))
 logger.info("Config status | BREVO_API_KEY configured: %s", _is_configured("BREVO_API_KEY"))
 logger.info("Config status | BREVO_SENDER_EMAIL configured: %s", _is_configured("BREVO_SENDER_EMAIL"))
+logger.info("Config status | EMAIL_ENABLED: %s", is_email_enabled())
+logger.info("Config status | ALERTS_ENABLED: %s", is_alerts_enabled())
 logger.info(
     "Config status | SMTP host=%s port=%s email_user=%s",
     (os.environ.get("EMAIL_HOST") or os.environ.get("SMTP_HOST") or "smtp.office365.com").strip(),
@@ -4578,6 +4590,10 @@ def get_brevo_sender_name():
 
 
 def send_mail_via_brevo_api(recipients, subject, text_body, html_body=None):
+    if not is_email_enabled():
+        logger.info("Email disabled via EMAIL_ENABLED; skipping Brevo API send")
+        return True, "EMAIL_ENABLED=0"
+
     api_key = get_brevo_api_key()
     sender_email = get_brevo_sender_email()
     if not api_key or not sender_email:
@@ -4628,6 +4644,9 @@ def send_mail_via_brevo_api(recipients, subject, text_body, html_body=None):
         return False, str(ex)
 
 def send_registration_received_email(user_email, base_url=None):
+    if not is_email_enabled():
+        logger.info("Email disabled via EMAIL_ENABLED; skipping registration confirmation to %s", user_email)
+        return True, "EMAIL_ENABLED=0"
 
     sender = get_email_user()
     password = get_email_password()
@@ -4692,6 +4711,9 @@ BullEye AI
         return False, str(ex)
 
 def send_approval_email(new_user_email, base_url=None):
+    if not is_email_enabled():
+        logger.info("Email disabled via EMAIL_ENABLED; skipping approval request mail for %s", new_user_email)
+        return True, "EMAIL_ENABLED=0"
 
     sender = get_email_user()
     password = get_email_password()
@@ -4785,6 +4807,10 @@ Neka:
 
 
 def send_account_approved_email(user_email):
+    if not is_email_enabled():
+        logger.info("Email disabled via EMAIL_ENABLED; skipping account-approved mail to %s", user_email)
+        return True, "EMAIL_ENABLED=0"
+
     sender = get_email_user()
     password = get_email_password()
 
@@ -4842,6 +4868,12 @@ Välkommen!
 
 # ===== ALERT FUNCTION =====
 def send_alert(email, message, alert_type="GENERAL"):
+    if not is_email_enabled():
+        logger.info("Email disabled via EMAIL_ENABLED; alert mail skipped for %s", email)
+        with open(ALERT_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {email} {alert_type} DISABLED {message}\n")
+        return
+
     sender = get_email_user()
     password = get_email_password()
 
@@ -4878,6 +4910,9 @@ def send_alert(email, message, alert_type="GENERAL"):
 
 # ===== RESET EMAIL =====
 def send_reset_email(email, new_password):
+    if not is_email_enabled():
+        logger.warning("Reset mail blocked because EMAIL_ENABLED is disabled")
+        return False, "Email-funktionen är tillfälligt avstängd (EMAIL_ENABLED=0). Kontakta admin."
 
     sender = get_email_user()
     password = get_email_password()
@@ -5567,6 +5602,10 @@ def dashboard():
             session.get("send_sell_alerts", user_settings.get("send_sell_alerts", False)),
             default=False,
         )
+    if not is_alerts_enabled():
+        send_buy_alerts = False
+        send_sell_alerts = False
+
     session["amount"] = amount
     session["ai_strategy"] = ai_strategy
     session["ai_risk"] = ai_risk
@@ -5922,6 +5961,7 @@ def dashboard():
         priority=priority,
         send_buy_alerts=send_buy_alerts,
         send_sell_alerts=send_sell_alerts,
+        alerts_enabled=is_alerts_enabled(),
         usd_sek=usd_sek_rate,
         top_global=top_global,
         ai_loading=ai_loading,
@@ -6073,6 +6113,9 @@ def portfolio_page():
 
     send_buy_alerts = coerce_bool_setting(session.get("send_buy_alerts", False), default=False)
     send_sell_alerts = coerce_bool_setting(session.get("send_sell_alerts", False), default=False)
+    if not is_alerts_enabled():
+        send_buy_alerts = False
+        send_sell_alerts = False
 
     registered_users = load_registered_users() if is_admin else []
     regular_users, admin_users = split_registered_users(registered_users) if is_admin else ([], [])
@@ -6138,6 +6181,9 @@ def portfolio_page():
         pf_strategy=pf_strategy,
         pf_risk=pf_risk,
         capital_currency=session.get("capital_currency", "SEK"),
+        send_buy_alerts=send_buy_alerts,
+        send_sell_alerts=send_sell_alerts,
+        alerts_enabled=is_alerts_enabled(),
         quick_bootstrap=False,
         active_tab="portfolio",
         min_trend_data=min_trend_data,
