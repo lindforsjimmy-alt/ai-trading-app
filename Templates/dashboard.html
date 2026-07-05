@@ -1292,6 +1292,11 @@
                     <div class="header-actions">
                         <a class="top-action" href="/change_trading_platform">Ändra Handelsplattform</a>
                         <a class="top-action" href="/change_password">Byt lösenord</a>
+                        <form method="POST" action="/delete_account" style="margin:0;">
+                            <button class="top-action logout" type="submit"
+                                onclick="return confirm('Är du säker på att du vill avregistrera konto?');">Avregistrera
+                                konto</button>
+                        </form>
                         <a class="top-action logout" href="/logout">Logga ut</a>
                     </div>
                 </div>

@@ -2731,7 +2731,7 @@ def logo():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     print("DEBUG: LOGIN ROUTE CALLED")
-    msg = ""
+    msg = session.pop("login_msg", "")
 
     if request.method == "POST":
 
@@ -3318,6 +3318,19 @@ def register_account():
 @app.route("/logout")
 def logout():
     session.clear()
+    return redirect("/login")
+
+
+@app.route("/delete_account", methods=["POST"])
+def delete_account():
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+
+    delete_registered_user(user)
+    reject_pending_user(user)
+    session.clear()
+    session["login_msg"] = "✅ Konto avregistrerat"
     return redirect("/login")
 
 # ✅ ===== CHANGE PASSWORD =====
