@@ -3591,12 +3591,24 @@ def register_account():
             hashed = hash_password(password)
             create_pending_user(entered_email, hashed, selected_platforms)
             request_base_url = (request.url_root or "").rstrip("/")
-            mail_ok, mail_err = send_approval_email(entered_email, request_base_url)
-            if mail_ok:
-                msg = "✅ Ansökan skickad. Vi har tagit emot din förfrågan och du får e-post när kontot blivit godkänt."
+            admin_mail_ok, admin_mail_err = send_approval_email(entered_email, request_base_url)
+            user_mail_ok, user_mail_err = send_registration_received_email(entered_email, request_base_url)
+
+            if admin_mail_ok and user_mail_ok:
+                msg = "✅ Ansökan skickad. Bekräftelsemail är skickat och du får ett nytt mail när kontot blir godkänt."
                 msg_class = "msg-success"
+            elif admin_mail_ok and not user_mail_ok:
+                msg = f"✅ Ansökan skickad. Admin-notis skickades, men bekräftelsemail till dig misslyckades ({user_mail_err})."
+                msg_class = "msg-warn"
+            elif not admin_mail_ok and user_mail_ok:
+                msg = f"✅ Ansökan skickad. Bekräftelsemail till dig skickades, men admin-notis misslyckades ({admin_mail_err})."
+                msg_class = "msg-warn"
             else:
-                msg = f"✅ Ansökan skickad. Admin-notis via e-post misslyckades just nu ({mail_err}). Förfrågan finns ändå sparad och kan godkännas manuellt."
+                msg = (
+                    "✅ Ansökan skickad. Mailutskick misslyckades just nu "
+                    f"(admin: {admin_mail_err}, bekräftelse: {user_mail_err}). "
+                    "Förfrågan finns ändå sparad och kan godkännas manuellt."
+                )
                 msg_class = "msg-warn"
             entered_email = ""
             selected_known = list(DEFAULT_TRADING_PLATFORMS)
@@ -4512,6 +4524,50 @@ def forgot():
     """
 # ===== EMAIL/SYSTEM =====
 # ===== APPROVAL EMAIL =====
+
+def send_registration_received_email(user_email, base_url=None):
+
+    sender = os.environ.get("EMAIL_USER")
+    password = os.environ.get("EMAIL_PASSWORD")
+
+    if not sender or not password:
+        logger.warning("Registration confirmation mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
+        return False, "EMAIL_USER/EMAIL_PASSWORD saknas"
+
+    base = (base_url or BASE_URL or "").strip().rstrip("/")
+    if not base:
+        base = "http://localhost:10000"
+
+    body = f"""
+Hej,
+
+Vi har tagit emot din kontoansökan till BullEye AI.
+
+Nästa steg:
+1. Din ansökan granskas av admin.
+2. När kontot är godkänt får du ett nytt mail.
+3. Därefter kan du logga in här: {base}/login
+
+Vänliga hälsningar,
+BullEye AI
+"""
+
+    msg = MIMEText(body)
+    msg["Subject"] = "BullEye AI - Vi har tagit emot din ansökan"
+    msg["From"] = sender
+    msg["To"] = user_email
+
+    try:
+        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        logger.info("REGISTRATION CONFIRMATION MAIL SENT TO: %s", user_email)
+        return True, ""
+    except Exception as ex:
+        logger.error("Registration confirmation mail error for %s: %s", user_email, ex)
+        return False, str(ex)
 
 def send_approval_email(new_user_email, base_url=None):
 
