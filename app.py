@@ -96,16 +96,123 @@ ALERT_LOG_FILE = os.environ.get("ALERT_LOG_FILE", "stock_data/alerts.log")
 IS_RENDER = os.environ.get("RENDER", "").strip().lower() in ("1", "true", "yes")
 LEAN_MODE = os.environ.get("LEAN_MODE", "1" if IS_RENDER else "0").strip().lower() in ("1", "true", "yes")
 
+
+def _env_int(name, default):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    return max(1, value)
+
+
+def _scan_profile_defaults(lean_mode):
+    if lean_mode:
+        return {
+            "stable": {
+                "market_symbol_limit": 50,
+                "scan_candidate_limit": 90,
+                "coingecko_pages": 1,
+                "ai_crypto_limit": 12,
+                "max_deep_analysis_candidates": 110,
+            },
+            "balanced": {
+                "market_symbol_limit": 70,
+                "scan_candidate_limit": 140,
+                "coingecko_pages": 1,
+                "ai_crypto_limit": 18,
+                "max_deep_analysis_candidates": 160,
+            },
+            "aggressive": {
+                "market_symbol_limit": 95,
+                "scan_candidate_limit": 210,
+                "coingecko_pages": 2,
+                "ai_crypto_limit": 28,
+                "max_deep_analysis_candidates": 230,
+            },
+        }
+
+    return {
+        "stable": {
+            "market_symbol_limit": 90,
+            "scan_candidate_limit": 170,
+            "coingecko_pages": 2,
+            "ai_crypto_limit": 35,
+            "max_deep_analysis_candidates": 220,
+        },
+        "balanced": {
+            "market_symbol_limit": 120,
+            "scan_candidate_limit": 220,
+            "coingecko_pages": 3,
+            "ai_crypto_limit": 60,
+            "max_deep_analysis_candidates": 260,
+        },
+        "aggressive": {
+            "market_symbol_limit": 170,
+            "scan_candidate_limit": 320,
+            "coingecko_pages": 4,
+            "ai_crypto_limit": 90,
+            "max_deep_analysis_candidates": 360,
+        },
+    }
+
+
+AI_SCAN_PROFILE = (os.environ.get("AI_SCAN_PROFILE") or ("balanced" if LEAN_MODE else "aggressive")).strip().lower()
+PROFILE_DEFAULTS = _scan_profile_defaults(LEAN_MODE)
+if AI_SCAN_PROFILE not in PROFILE_DEFAULTS:
+    AI_SCAN_PROFILE = "balanced"
+
+_active_profile = PROFILE_DEFAULTS[AI_SCAN_PROFILE]
+
 # Starter-friendly caps to keep memory usage stable on Render.
-MARKET_SYMBOL_LIMIT = 40 if LEAN_MODE else 80
-SCAN_CANDIDATE_LIMIT = 80 if LEAN_MODE else 150
-COINGECKO_PAGES = 1 if LEAN_MODE else 4
-AI_CRYPTO_LIMIT = 12 if LEAN_MODE else 40
+MARKET_SYMBOL_LIMIT = _env_int("MARKET_SYMBOL_LIMIT", _active_profile["market_symbol_limit"])
+SCAN_CANDIDATE_LIMIT = _env_int("SCAN_CANDIDATE_LIMIT", _active_profile["scan_candidate_limit"])
+COINGECKO_PAGES = _env_int("COINGECKO_PAGES", _active_profile["coingecko_pages"])
+AI_CRYPTO_LIMIT = _env_int("AI_CRYPTO_LIMIT", _active_profile["ai_crypto_limit"])
 MAX_NEWS_CACHE_ITEMS = 200 if LEAN_MODE else 1000
 MAX_COMPANY_CACHE_ITEMS = 400 if LEAN_MODE else 2000
 MAX_FUNDAMENTAL_CACHE_ITEMS = 200 if LEAN_MODE else 1000
 MAX_INDEX_HISTORY_CACHE_ITEMS = 24 if LEAN_MODE else 120
+MAX_DEEP_ANALYSIS_CANDIDATES = _env_int(
+    "MAX_DEEP_ANALYSIS_CANDIDATES",
+    _active_profile["max_deep_analysis_candidates"],
+)
 NEWS_REQUEST_TIMEOUT = float(os.environ.get("NEWS_REQUEST_TIMEOUT", "3.5"))
+YAHOO_BLOCK_SECONDS = _env_int("YAHOO_BLOCK_SECONDS", 600)
+POLYGON_BLOCK_SECONDS = _env_int("POLYGON_BLOCK_SECONDS", 600)
+IEX_BLOCK_SECONDS = _env_int("IEX_BLOCK_SECONDS", 600)
+YAHOO_LIMIT_PER_MIN = _env_int("YAHOO_LIMIT_PER_MIN", 120 if LEAN_MODE else 240)
+POLYGON_LIMIT_PER_MIN = _env_int("POLYGON_LIMIT_PER_MIN", 25 if LEAN_MODE else 60)
+IEX_LIMIT_PER_MIN = _env_int("IEX_LIMIT_PER_MIN", 25 if LEAN_MODE else 60)
+
+POLYGON_API_KEY = (os.environ.get("POLYGON_API_KEY") or "").strip()
+IEX_API_KEY = (os.environ.get("IEX_API_KEY") or os.environ.get("IEX_TOKEN") or "").strip()
+
+DEFAULT_PRICE_PROVIDER_ORDER = "finnhub,polygon,iex,yahoo"
+PRICE_PROVIDER_ORDER = [
+    p.strip().lower()
+    for p in (os.environ.get("PRICE_PROVIDER_ORDER") or DEFAULT_PRICE_PROVIDER_ORDER).split(",")
+    if p.strip()
+]
+
+logger.info(
+    "AI scan profile=%s | MARKET_SYMBOL_LIMIT=%s SCAN_CANDIDATE_LIMIT=%s MAX_DEEP_ANALYSIS_CANDIDATES=%s AI_CRYPTO_LIMIT=%s COINGECKO_PAGES=%s",
+    AI_SCAN_PROFILE,
+    MARKET_SYMBOL_LIMIT,
+    SCAN_CANDIDATE_LIMIT,
+    MAX_DEEP_ANALYSIS_CANDIDATES,
+    AI_CRYPTO_LIMIT,
+    COINGECKO_PAGES,
+)
+logger.info(
+    "Price providers order=%s | yahoo_limit=%s polygon_limit=%s iex_limit=%s",
+    ",".join(PRICE_PROVIDER_ORDER),
+    YAHOO_LIMIT_PER_MIN,
+    POLYGON_LIMIT_PER_MIN,
+    IEX_LIMIT_PER_MIN,
+)
 
 FUNDAMENTAL_CACHE = {}
 FUNDAMENTAL_CACHE_TIME = 86400
@@ -126,6 +233,8 @@ ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
 USER_SETTINGS_FILE = "stock_data/user_settings.json"
 SOLD_TRADES_FILE = "stock_data/sold_trades.txt"
+GLOBAL_TICKERS_FILE = "stock_data/global_tickers.txt"
+OMX_TICKERS_FILE = "stock_data/omx_tickers.csv"
 USER_SETTINGS_LOCK = threading.Lock()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
@@ -1314,6 +1423,92 @@ def safe_fetch(fn, retries=3):
 price_cache = {}
 CACHE_TIME = 60
 
+provider_state = {
+    "yahoo": {
+        "count": 0,
+        "last_reset": time.time(),
+        "disabled_until": 0.0,
+        "failure_streak": 0,
+    },
+    "polygon": {
+        "count": 0,
+        "last_reset": time.time(),
+        "disabled_until": 0.0,
+        "failure_streak": 0,
+    },
+    "iex": {
+        "count": 0,
+        "last_reset": time.time(),
+        "disabled_until": 0.0,
+        "failure_streak": 0,
+    },
+}
+
+
+def _provider_budget_limit(name):
+    if name == "yahoo":
+        return YAHOO_LIMIT_PER_MIN
+    if name == "polygon":
+        return POLYGON_LIMIT_PER_MIN
+    if name == "iex":
+        return IEX_LIMIT_PER_MIN
+    return 0
+
+
+def _provider_block_seconds(name):
+    if name == "yahoo":
+        return YAHOO_BLOCK_SECONDS
+    if name == "polygon":
+        return POLYGON_BLOCK_SECONDS
+    if name == "iex":
+        return IEX_BLOCK_SECONDS
+    return 600
+
+
+def _provider_begin(name):
+    state = provider_state.get(name)
+    if not state:
+        return False
+
+    now = time.time()
+    if now < float(state.get("disabled_until", 0.0)):
+        return False
+
+    if now - float(state.get("last_reset", 0.0)) > 60:
+        state["count"] = 0
+        state["last_reset"] = now
+
+    limit = _provider_budget_limit(name)
+    if state["count"] >= limit:
+        return False
+
+    state["count"] += 1
+    return True
+
+
+def _provider_success(name):
+    state = provider_state.get(name)
+    if not state:
+        return
+    state["failure_streak"] = 0
+
+
+def _provider_failure(name, status_code=None):
+    state = provider_state.get(name)
+    if not state:
+        return
+
+    if status_code in (403, 429):
+        state["failure_streak"] = int(state.get("failure_streak", 0)) + 1
+    else:
+        state["failure_streak"] = max(0, int(state.get("failure_streak", 0)))
+
+    if state["failure_streak"] >= 3:
+        block_for = _provider_block_seconds(name)
+        state["disabled_until"] = time.time() + block_for
+        state["failure_streak"] = 0
+        logger.warning("Provider %s temporarily disabled for %ss", name, block_for)
+
 market_cache = {}
 MARKET_CACHE_TIME = 120
 
@@ -1373,13 +1568,13 @@ def get_price_finnhub(symbol):
         finnhub_calls["count"] = 0
         finnhub_calls["last_reset"] = now
 
-    finnhub_calls["count"] += 1
-
-    print(f"📊 Finnhub calls: {finnhub_calls['count']}/{FINNHUB_LIMIT}")
-
     if finnhub_calls["count"] >= FINNHUB_LIMIT - 2:
         print("⚠️ Rate limit – skipping")
         return None
+
+    finnhub_calls["count"] += 1
+
+    print(f"📊 Finnhub calls: {finnhub_calls['count']}/{FINNHUB_LIMIT}")
 
     try:
         data = finnhub_client.quote(symbol)
@@ -1401,6 +1596,9 @@ def get_price_finnhub(symbol):
 
 
 def get_price_yahoo(symbol):
+    if not _provider_begin("yahoo"):
+        return None
+
     try:
         url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
 
@@ -1412,42 +1610,166 @@ def get_price_yahoo(symbol):
 
         r = requests.get(url, headers=headers, timeout=5)
 
+        if r.status_code in (403, 429):
+            _provider_failure("yahoo", r.status_code)
+            return None
+
         if r.status_code != 200:
+            _provider_failure("yahoo", r.status_code)
             return None
 
         data = r.json()
         res = data.get("quoteResponse", {}).get("result", [])
 
         if res:
-            return res[0].get("regularMarketPrice")
+            price = res[0].get("regularMarketPrice")
+            if isinstance(price, (int, float)) and price > 0:
+                _provider_success("yahoo")
+                return {
+                    "price": float(price),
+                    "volume": 0,
+                }
+        _provider_failure("yahoo")
 
-    except:
+    except Exception:
+        _provider_failure("yahoo")
         return None
 
     return None
 
 
+def get_price_polygon(symbol):
+    if not POLYGON_API_KEY:
+        return None
+    if not _provider_begin("polygon"):
+        return None
+
+    try:
+        url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
+        response = requests.get(
+            url,
+            params={
+                "adjusted": "true",
+                "apiKey": POLYGON_API_KEY,
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            },
+            timeout=5,
+        )
+        if response.status_code in (403, 429):
+            _provider_failure("polygon", response.status_code)
+            return None
+        if response.status_code != 200:
+            _provider_failure("polygon", response.status_code)
+            return None
+
+        payload = response.json() or {}
+        results = payload.get("results") or []
+        if not results:
+            _provider_failure("polygon")
+            return None
+
+        row = results[0] or {}
+        price = row.get("c")
+        volume = row.get("v") or 0
+        if isinstance(price, (int, float)) and price > 0:
+            _provider_success("polygon")
+            return {
+                "price": float(price),
+                "volume": float(volume or 0),
+            }
+
+        _provider_failure("polygon")
+        return None
+    except Exception:
+        _provider_failure("polygon")
+        return None
+
+
+def get_price_iex(symbol):
+    if not IEX_API_KEY:
+        return None
+    if not _provider_begin("iex"):
+        return None
+
+    try:
+        url = f"https://cloud.iexapis.com/stable/stock/{symbol}/quote"
+        response = requests.get(
+            url,
+            params={"token": IEX_API_KEY},
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            },
+            timeout=5,
+        )
+        if response.status_code in (403, 429):
+            _provider_failure("iex", response.status_code)
+            return None
+        if response.status_code != 200:
+            _provider_failure("iex", response.status_code)
+            return None
+
+        payload = response.json() or {}
+        price = payload.get("latestPrice")
+        volume = payload.get("latestVolume") or 0
+        if isinstance(price, (int, float)) and price > 0:
+            _provider_success("iex")
+            return {
+                "price": float(price),
+                "volume": float(volume or 0),
+            }
+
+        _provider_failure("iex")
+        return None
+    except Exception:
+        _provider_failure("iex")
+        return None
+
+
 # ✅ CENTRAL PRIS-FUNKTION (VIKTIG!)
-def get_price(symbol):
+def get_price(symbol, allow_finnhub=True):
+    now = time.time()
+    cached = price_cache.get(symbol)
+    if cached:
+        cached_value, cached_at = cached
+        if now - cached_at < CACHE_TIME:
+            return cached_value
 
-    data = get_price_finnhub(symbol)
+    for provider in PRICE_PROVIDER_ORDER:
+        data = None
 
-    if data:
-        return data
+        if provider == "finnhub":
+            if not allow_finnhub:
+                continue
+            data = get_price_finnhub(symbol)
+        elif provider == "yahoo":
+            data = get_price_yahoo(symbol)
+        elif provider == "polygon":
+            data = get_price_polygon(symbol)
+        elif provider == "iex":
+            data = get_price_iex(symbol)
 
-    price = get_price_yahoo(symbol)
-
-    if price:
-        return {
-            "price": price,
-            "volume": 0
-        }
+        if data:
+            price_cache[symbol] = (data, now)
+            return data
 
     return None
 
 # ===== FINNHUB FUNDAMENTAL DATA =====
 def get_company_profile(symbol):
+    now = time.time()
+    if now - finnhub_calls["last_reset"] > 60:
+        finnhub_calls["count"] = 0
+        finnhub_calls["last_reset"] = now
+
+    if finnhub_calls["count"] >= FINNHUB_LIMIT - 2:
+        return {}
+
     try:
+        finnhub_calls["count"] += 1
         profile = finnhub_client.company_profile2(symbol=symbol)
         return profile or {}
     except Exception as ex:
@@ -1456,7 +1778,16 @@ def get_company_profile(symbol):
 
 
 def get_company_metrics(symbol):
+    now = time.time()
+    if now - finnhub_calls["last_reset"] > 60:
+        finnhub_calls["count"] = 0
+        finnhub_calls["last_reset"] = now
+
+    if finnhub_calls["count"] >= FINNHUB_LIMIT - 2:
+        return {}
+
     try:
+        finnhub_calls["count"] += 1
         metrics = finnhub_client.company_basic_financials(symbol, "all")
         return metrics or {}
     except Exception as ex:
@@ -1468,25 +1799,27 @@ def get_asset_display_name(symbol):
     if symbol in COMPANY_NAME_CACHE:
         return COMPANY_NAME_CACHE[symbol]
 
-    profile = get_company_profile(symbol)
-    company_name = profile.get("name")
+    # Prefer Yahoo for names to avoid spending scarce Finnhub quota during scans.
+    company_name = None
+    try:
+        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Referer": "https://finance.yahoo.com/"
+        }
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            result = data.get("quoteResponse", {}).get("result", [])
+            if result:
+                company_name = result[0].get("longName") or result[0].get("shortName")
+    except Exception as ex:
+        logger.debug("Yahoo name fetch failed for %s: %s", symbol, ex)
 
     if not company_name:
-        try:
-            url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "application/json",
-                "Referer": "https://finance.yahoo.com/"
-            }
-            r = requests.get(url, headers=headers, timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                result = data.get("quoteResponse", {}).get("result", [])
-                if result:
-                    company_name = result[0].get("longName") or result[0].get("shortName")
-        except Exception as ex:
-            logger.debug("Yahoo name fetch failed for %s: %s", symbol, ex)
+        profile = get_company_profile(symbol)
+        company_name = profile.get("name")
 
     if not company_name:
         COMPANY_NAME_CACHE[symbol] = None
@@ -1668,6 +2001,27 @@ def get_sp500_symbols():
     print("✅ Loaded S&P500 (local)")
     return SP500_SYMBOLS
 
+
+def load_symbols_from_file(file_path, has_header=False):
+    symbols = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return symbols
+
+    start_idx = 1 if has_header and lines else 0
+    for raw in lines[start_idx:]:
+        sym = (raw or "").strip().upper()
+        if not sym:
+            continue
+        if "," in sym:
+            sym = sym.split(",", 1)[0].strip().upper()
+        if sym and sym != "TICKER":
+            symbols.append(sym)
+
+    return symbols
+
 def get_global_stock_universe():
     base = get_sp500_symbols()
 
@@ -1677,20 +2031,27 @@ def get_global_stock_universe():
         "SAP","ASML","NOVO-B.CO","VOLV-B.CO"
     ]
 
-    symbols = list(set(base + extra))
+    file_symbols = load_symbols_from_file(GLOBAL_TICKERS_FILE)
+    omx_symbols = load_symbols_from_file(OMX_TICKERS_FILE, has_header=True)
+
+    symbols = sorted(set(base + extra + file_symbols + omx_symbols))
 
     return symbols[:2000]
 
 def market_scanner():
 
     symbols = get_global_stock_universe()
+    if symbols:
+        # Rotate the starting point each hour so scans cover different symbols over time.
+        offset = int(time.time() // 3600) % len(symbols)
+        symbols = symbols[offset:] + symbols[:offset]
 
     candidates = []
 
     for sym in symbols:
 
         # ✅ tillåt fler aktier
-        if len(sym) > 8:
+        if len(sym) > 14:
             continue
 
         candidates.append(sym)
@@ -1702,13 +2063,13 @@ def market_scanner():
     return candidates
 
 # ✅ AKTIER (Finnhub + Yahoo fallback)
-def get_stock_assets(symbols):
+def get_stock_assets(symbols, use_finnhub=True, include_display_name=True):
 
     assets = []
 
     for sym in symbols:
 
-        price = get_price(sym)
+        price = get_price(sym, allow_finnhub=use_finnhub)
 
         if not price:
             continue
@@ -1726,7 +2087,7 @@ def get_stock_assets(symbols):
             "t": sym,
             "symbol": sym,
             "name": sym,
-            "display_name": get_asset_display_name(sym),
+            "display_name": get_asset_display_name(sym) if include_display_name else sym,
             "price": p,
             "currency": "USD",
             "type": "stock"
@@ -2590,12 +2951,53 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
     result = []
   
     symbols = market_scanner()
-    assets = get_stock_assets(symbols)
+    stock_assets = get_stock_assets(symbols, use_finnhub=False, include_display_name=False)
+
+    # If Yahoo path is temporarily unavailable, do a controlled Finnhub rescue pass.
+    min_stock_target = max(24, min(80, int(len(symbols) * 0.25)))
+    if len(stock_assets) < min_stock_target:
+        stock_seen = {a.get("t") for a in stock_assets}
+        rescue_symbols = [sym for sym in symbols if sym not in stock_seen]
+        rescue_budget = max(12, min(40, FINNHUB_LIMIT // 2))
+        rescue_symbols = rescue_symbols[:rescue_budget]
+        if rescue_symbols:
+            logger.info(
+                "AI scan rescue pass via Finnhub | current=%s target=%s rescue_budget=%s",
+                len(stock_assets),
+                min_stock_target,
+                rescue_budget,
+            )
+            stock_assets.extend(
+                get_stock_assets(rescue_symbols, use_finnhub=True, include_display_name=False)
+            )
+
+    assets = stock_assets
     assets += get_crypto_assets()[:AI_CRYPTO_LIMIT]
 
     if not assets:
         print("⚠️ No cache – using fallback market fetch")
         assets = safe_fetch(get_market_assets)
+
+    # Two-stage selection: prioritize quality/liquidity and cap expensive deep analysis work.
+    deduped_assets = []
+    seen_assets = set()
+    for asset in assets:
+        sym = (asset.get("t") or "").strip().upper()
+        if not sym or sym in seen_assets:
+            continue
+        seen_assets.add(sym)
+        deduped_assets.append(asset)
+
+    assets = sorted(
+        deduped_assets,
+        key=lambda x: (
+            1 if x.get("type") == "stock" else 0,
+            float(x.get("volume") or 0),
+            1 if 2 <= float(x.get("price") or 0) <= 400 else 0,
+        ),
+        reverse=True,
+    )
+    assets = assets[:MAX_DEEP_ANALYSIS_CANDIDATES]
 
     for s in assets:
         
@@ -2750,7 +3152,20 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
     stock_results = [x for x in result if x.get("type") == "stock"]
 
     if len(stock_results) > 0:
-        result = stock_results[:10] + result
+        prioritized = stock_results[:10] + result
+    else:
+        prioritized = result
+
+    # Remove duplicates so top list can contain more unique opportunities.
+    seen_symbols = set()
+    unique_result = []
+    for item in prioritized:
+        sym = item.get("t")
+        if not sym or sym in seen_symbols:
+            continue
+        seen_symbols.add(sym)
+        unique_result.append(item)
+    result = unique_result
 
     result = [s for s in result if s["price"] > 0]
 
@@ -6276,13 +6691,17 @@ def dashboard():
         x for x in ranked_for_recommendations
         if x.get("type") != "crypto" and x.get("t") not in owned_symbols
     ]
+    stock_candidates_with_owned = [
+        x for x in ranked_for_recommendations
+        if x.get("type") != "crypto"
+    ]
     stock_buy_candidates = [
         x for x in stock_candidates
         if x.get("signal") == "KÖP"
     ]
     stock_buy_candidates = dedupe_by_symbol(stock_buy_candidates)
 
-    def _fill_recommendations(primary_candidates, full_candidates, limit):
+    def _fill_recommendations(primary_candidates, full_candidates, limit, backup_candidates=None):
         selected = list(primary_candidates[:limit])
         if len(selected) >= limit:
             return selected
@@ -6300,11 +6719,28 @@ def dashboard():
             if len(selected) >= limit:
                 return selected
 
+        # If still too few, allow owned symbols so user still gets enough ideas.
+        backup_pool = backup_candidates or []
+        backup = [
+            x for x in backup_pool
+            if x.get("signal") in {"KÖP", "AVVAKTA KÖP"} and x.get("t") not in selected_symbols
+        ]
+        backup = sorted(backup, key=lambda x: float(x.get("score", 0) or 0), reverse=True)
+        for cand in backup:
+            selected.append(cand)
+            selected_symbols.add(cand.get("t"))
+            if len(selected) >= limit:
+                return selected
+
         return selected
 
     crypto_candidates = [
         x for x in ranked_for_recommendations
         if x.get("type") == "crypto" and x.get("t") not in owned_symbols
+    ]
+    crypto_candidates_with_owned = [
+        x for x in ranked_for_recommendations
+        if x.get("type") == "crypto"
     ]
 
     crypto_candidates = [
@@ -6318,8 +6754,18 @@ def dashboard():
     crypto_buy_candidates = dedupe_by_symbol(crypto_buy_candidates)
 
     # Ensure dashboard always has recommendation rows, even when strict KÖP is scarce.
-    stock_display_candidates = _fill_recommendations(stock_buy_candidates, stock_candidates, top_n)
-    crypto_display_candidates = _fill_recommendations(crypto_buy_candidates, crypto_candidates, top_n)
+    stock_display_candidates = _fill_recommendations(
+        stock_buy_candidates,
+        stock_candidates,
+        top_n,
+        backup_candidates=stock_candidates_with_owned,
+    )
+    crypto_display_candidates = _fill_recommendations(
+        crypto_buy_candidates,
+        crypto_candidates,
+        top_n,
+        backup_candidates=crypto_candidates_with_owned,
+    )
 
     # ✅ PRIORITY
     if priority == "stocks":
