@@ -6868,22 +6868,27 @@ def dashboard():
                     sell(user, t, int(qty))
                     return redirect("/dashboard?tab=portfolio")
 
-    # ✅ GENERATE INVESTMENT ANALYSIS FOR BUY SIGNALS
-    if not quick_bootstrap:
-        for s in stocks + crypto:
-            if s.get("signal") == "KÖP":
-                # Get historical prices for better analysis
-                hist_data = get_historical_data(s["t"], "3mo")
-                prices = []
-                if hist_data:
-                    try:
-                        prices = hist_data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-                        prices = [p for p in prices if p]
-                    except:
-                        prices = []
+    # ✅ GENERATE AI ANALYSIS FOR DISPLAYED CANDIDATES
+    # Keep rich popup analysis visible in AI Aktieval for all signals.
+    for s in stocks + crypto:
+        if quick_bootstrap:
+            s["investment_analysis"] = generate_watch_analysis(s)
+            continue
 
-                # Generate detailed analysis
-                s["investment_analysis"] = generate_investment_analysis(s, prices)
+        if s.get("signal") == "KÖP":
+            # Get historical prices for better analysis on active BUY candidates.
+            hist_data = get_historical_data(s["t"], "3mo")
+            prices = []
+            if hist_data:
+                try:
+                    prices = hist_data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+                    prices = [p for p in prices if p]
+                except:
+                    prices = []
+
+            s["investment_analysis"] = generate_investment_analysis(s, prices)
+        else:
+            s["investment_analysis"] = generate_watch_analysis(s)
 
     # ✅ USAGE
     usage = finnhub_calls.get("count", 0)
