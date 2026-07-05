@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 # ===== IMPORTS =====
-from typing import assert_type
 import builtins as _builtins
 import json
 
@@ -393,6 +392,47 @@ def serialize_user_record(record):
     platforms = normalize_trading_platform_selection(record.get("platforms"))
     platform_blob = ",".join(platforms)
     return f"{record['email']}|{record['password_hash']}|{platform_blob}\n"
+
+
+def dedupe_user_records_file(file_path):
+    """Remove duplicate email records while preserving first valid occurrence."""
+    if not os.path.exists(file_path):
+        return 0
+
+    lines = open(file_path, encoding="utf-8").readlines()
+    seen_emails = set()
+    output_lines = []
+    removed = 0
+
+    for raw in lines:
+        rec = parse_user_record_line(raw)
+        if not rec:
+            output_lines.append(raw if raw.endswith("\n") else f"{raw}\n")
+            continue
+
+        email = rec["email"]
+        if email in seen_emails:
+            removed += 1
+            continue
+
+        seen_emails.add(email)
+        output_lines.append(serialize_user_record(rec))
+
+    if removed > 0 or len(output_lines) != len(lines):
+        open(file_path, "w", encoding="utf-8").writelines(output_lines)
+
+    return removed
+
+
+def run_auth_data_self_heal():
+    removed_users = dedupe_user_records_file(USERS_FILE)
+    removed_pending = dedupe_user_records_file(PENDING_FILE)
+    if removed_users or removed_pending:
+        logger.info(
+            "Auth self-heal removed duplicates | users=%s pending=%s",
+            removed_users,
+            removed_pending,
+        )
 
 
 def create_pending_user(email, password_hash, platforms=None):
@@ -2636,6 +2676,7 @@ def build_min_trend_data(user, ranked, index_keys=None, range_key="1Y"):
 # ===== APPROVAL SYSTEM =====
 PENDING_FILE = "stock_data/pending.txt"
 open(PENDING_FILE, "a").close()
+run_auth_data_self_heal()
 
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -2688,7 +2729,6 @@ def logo():
     return "Logo file not found", 404
 
 @app.route("/login", methods=["GET", "POST"])
-@app.route("/test_login", methods=["GET", "POST"])
 def login():
     print("DEBUG: LOGIN ROUTE CALLED")
     msg = ""
@@ -4753,7 +4793,6 @@ def dashboard():
                 return redirect("/dashboard?tab=portfolio")
 
         ranked_tmp = ai_results_cache.get("data") or ranked
-        ranked_by_symbol = {x.get("t"): x for x in ranked_tmp}
 
         if "buy_ai_recommendations" in request.form:
             for s in stocks + crypto:
