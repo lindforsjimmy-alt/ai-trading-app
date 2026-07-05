@@ -3247,8 +3247,11 @@ def approve():
 
     status = approve_pending_user(email)
     if status == "approved":
-        send_account_approved_email((email or "").strip().lower())
-        return "✅ User approved!"
+        ok, err = send_account_approved_email((email or "").strip().lower())
+        if ok:
+            return "✅ User approved! Confirmation email sent."
+        logger.warning("Approval completed but confirmation mail failed for %s: %s", email, err)
+        return "✅ User approved! Confirmation email failed."
     if status == "already_registered":
         return "ℹ️ User is already registered."
     return "ℹ️ User not found in pending list."
@@ -3555,6 +3558,7 @@ def login():
 @app.route("/register", methods=["GET", "POST"])
 def register_account():
     msg = ""
+    msg_class = "msg-neutral"
     entered_email = ""
     selected_known = list(DEFAULT_TRADING_PLATFORMS)
     other_name = ""
@@ -3570,19 +3574,30 @@ def register_account():
         has_known_or_other = bool(selected_known) or bool(other_name)
         if not entered_email or "@" not in entered_email:
             msg = "❌ Ange en giltig email-adress"
+            msg_class = "msg-error"
         elif not password:
             msg = "❌ Ange ett lösenord"
+            msg_class = "msg-error"
         elif not has_known_or_other:
             msg = "❌ Välj minst en handelsplattform eller fyll i Övrig"
+            msg_class = "msg-error"
         elif user_exists(entered_email):
             msg = "Användare finns redan"
+            msg_class = "msg-error"
         elif pending_user_exists(entered_email):
             msg = "ℹ️ Kontoansökan väntar redan på godkännande"
+            msg_class = "msg-neutral"
         else:
             hashed = hash_password(password)
             create_pending_user(entered_email, hashed, selected_platforms)
-            send_approval_email(entered_email)
-            msg = "✅ Konto är registrerat och inväntar godkännande"
+            request_base_url = (request.url_root or "").rstrip("/")
+            mail_ok, mail_err = send_approval_email(entered_email, request_base_url)
+            if mail_ok:
+                msg = "✅ Ansökan skickad. Vi har tagit emot din förfrågan och du får e-post när kontot blivit godkänt."
+                msg_class = "msg-success"
+            else:
+                msg = f"✅ Ansökan skickad. Admin-notis via e-post misslyckades just nu ({mail_err}). Förfrågan finns ändå sparad och kan godkännas manuellt."
+                msg_class = "msg-warn"
             entered_email = ""
             selected_known = list(DEFAULT_TRADING_PLATFORMS)
             other_name = ""
@@ -3801,10 +3816,37 @@ def register_account():
     }}
 
     .msg {{
-        color: #ffb4b4;
         font-size: 0.95rem;
         text-align: center;
-        min-height: 22px;
+        min-height: 28px;
+        line-height: 1.5;
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin: 0;
+    }}
+
+    .msg-neutral {{
+        color: #cbd5e1;
+        background: rgba(148, 163, 184, 0.14);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+    }}
+
+    .msg-success {{
+        color: #dcfce7;
+        background: rgba(22, 163, 74, 0.18);
+        border: 1px solid rgba(74, 222, 128, 0.35);
+    }}
+
+    .msg-warn {{
+        color: #fef3c7;
+        background: rgba(234, 179, 8, 0.16);
+        border: 1px solid rgba(250, 204, 21, 0.34);
+    }}
+
+    .msg-error {{
+        color: #fecaca;
+        background: rgba(239, 68, 68, 0.14);
+        border: 1px solid rgba(248, 113, 113, 0.34);
     }}
 
     @media (max-width: 680px) {{
@@ -3846,7 +3888,7 @@ def register_account():
                         <button class="button-primary" type="submit">Skapa konto</button>
                         <a class="button-secondary" href="/login">Tillbaka till login</a>
                     </div>
-                    <p class="msg">{msg}</p>
+                    <p class="msg {msg_class}">{msg}</p>
                 </form>
             </div>
         </div>
@@ -3891,7 +3933,6 @@ def delete_account():
 # ✅ ===== CHANGE PASSWORD =====
 @app.route("/change_password", methods=["GET", "POST"])
 def change_password():
-
     msg = ""
 
     user = session.get("user")
@@ -3899,32 +3940,175 @@ def change_password():
         return redirect("/login")
 
     if request.method == "POST":
-        new_password = request.form.get("new_password")
+        new_password = (request.form.get("new_password") or "").strip()
+        confirm_password = (request.form.get("confirm_password") or "").strip()
 
-        if new_password:
+        if not new_password:
+            msg = "❌ Ange ett nytt lösenord"
+        elif len(new_password) < 6:
+            msg = "❌ Lösenordet måste vara minst 6 tecken"
+        elif new_password != confirm_password:
+            msg = "❌ Lösenorden matchar inte"
+        else:
             new_hash = hash_password(new_password)
 
             updated, new_lines = build_updated_user_lines(user, new_hash)
             if updated:
                 if new_lines is not None:
                     open(USERS_FILE, "w").writelines(new_lines)
-                msg = "✅ Password updated successfully"
+                session.clear()
+                session["login_msg"] = "✅ Lösenordet är uppdaterat. Logga in med ditt nya lösenord."
+                return redirect("/login")
             else:
                 msg = "❌ Kunde inte uppdatera lösenord"
 
     return f"""
-    <h2>Change Password</h2>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+    :root {{
+        --bg: #0B2341;
+        --surface: rgba(11, 35, 65, 0.94);
+        --text: #e2e8f0;
+        --muted: #b3c7df;
+        --accent: #70E000;
+        --accent-gold: #F4B400;
+        --border: rgba(30, 90, 168, 0.28);
+    }}
 
-    <form method="post">
-        New password:<br>
-        <input type="password" name="new_password" required><br><br>
+    * {{ box-sizing: border-box; }}
+    body {{
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 30% 15%, rgba(112, 224, 0, 0.16), transparent 15%),
+                    radial-gradient(circle at 80% 8%, rgba(244, 180, 0, 0.10), transparent 13%),
+                    radial-gradient(circle at 50% 80%, rgba(112, 224, 0, 0.06), transparent 18%),
+                    linear-gradient(180deg, #050c23 0%, #071a3f 100%);
+        color: var(--text);
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+    }}
 
-        <button>Update</button>
-    </form>
+    .card {{
+        width: min(100%, 560px);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+        overflow: hidden;
+    }}
 
-    <p>{msg}</p>
+    .hero {{
+        padding: 28px 24px;
+        text-align: center;
+        background: radial-gradient(circle at top center, rgba(112, 224, 0, 0.14), transparent 25%),
+                    radial-gradient(circle at 15% 15%, rgba(244, 180, 0, 0.12), transparent 18%),
+                    linear-gradient(180deg, rgba(11, 35, 65, 0.98), rgba(30, 90, 168, 0.92));
+        border-bottom: 1px solid rgba(244, 180, 0, 0.16);
+    }}
 
-    <a href="/dashboard">Back</a>
+    .logo {{
+        width: 240px;
+        max-width: 95%;
+        height: auto;
+        margin-bottom: -4px;
+        border-radius: 16px;
+        filter: drop-shadow(0 6px 20px rgba(0,0,0,0.35));
+    }}
+
+    .hero p {{
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }}
+
+    .body {{
+        padding: 22px;
+        display: grid;
+        gap: 14px;
+    }}
+
+    label {{
+        color: var(--muted);
+        font-size: 0.92rem;
+        display: block;
+        margin-bottom: 8px;
+    }}
+
+    input[type="password"] {{
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(100, 175, 255, 0.16);
+        background: rgba(8, 18, 42, 0.9);
+        color: var(--text);
+        padding: 12px 14px;
+        outline: none;
+    }}
+
+    input[type="password"]:focus {{
+        border-color: var(--accent);
+        box-shadow: 0 0 0 4px rgba(38, 255, 156, 0.12);
+    }}
+
+    .row {{
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+    }}
+
+    button {{
+        border: none;
+        border-radius: 999px;
+        padding: 12px 18px;
+        font-weight: 600;
+        cursor: pointer;
+        background: linear-gradient(135deg, #70E000, #F4B400);
+        color: #08161d;
+    }}
+
+    a {{
+        color: var(--accent);
+        text-decoration: none;
+    }}
+
+    .msg {{
+        min-height: 24px;
+        color: #ffb4b4;
+        margin: 0;
+    }}
+    </style>
+    </head>
+    <body>
+    <div class="card">
+        <div class="hero">
+            <img class="logo" src="/Bulleye_ver3.png" alt="BullEye AI logo">
+            <p>Byt lösenord. Du loggas ut direkt efter uppdatering och loggar in med det nya lösenordet.</p>
+        </div>
+        <div class="body">
+            <form method="post">
+                <div>
+                    <label>Nytt lösenord</label>
+                    <input type="password" name="new_password" required>
+                </div>
+                <div>
+                    <label>Bekräfta nytt lösenord</label>
+                    <input type="password" name="confirm_password" required>
+                </div>
+                <div class="row">
+                    <button type="submit">Uppdatera lösenord</button>
+                    <a href="/dashboard">Tillbaka till dashboard</a>
+                </div>
+                <p class="msg">{msg}</p>
+            </form>
+        </div>
+    </div>
+    </body>
+    </html>
     """
 
 
@@ -4329,20 +4513,26 @@ def forgot():
 # ===== EMAIL/SYSTEM =====
 # ===== APPROVAL EMAIL =====
 
-def send_approval_email(new_user_email):
+def send_approval_email(new_user_email, base_url=None):
 
     sender = os.environ.get("EMAIL_USER")
     password = os.environ.get("EMAIL_PASSWORD")
 
     if not sender or not password:
-        print("⚠️ Email not configured")
-        return
+        logger.warning("Approval mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
+        return False, "EMAIL_USER/EMAIL_PASSWORD saknas"
+
+    base = (base_url or BASE_URL or "").strip().rstrip("/")
+    if not base:
+        base = "http://localhost:10000"
 
     encoded_email = quote_plus(new_user_email)
-    approve_link = f"{BASE_URL}/approve?email={encoded_email}"
-    reject_link = f"{BASE_URL}/reject?email={encoded_email}"
+    approve_link = f"{base}/approve?email={encoded_email}"
+    reject_link = f"{base}/reject?email={encoded_email}"
 
-    recipient = "lindfors.jimmy@outlook.com"
+    recipients = sorted(load_extra_admin_emails() | set(ADMIN_EMAILS))
+    if not recipients:
+        recipients = [sender]
 
     text_body = f"""
 Ny användare vill registrera:
@@ -4379,19 +4569,21 @@ Neka:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "Godkänn användare"
     msg["From"] = sender
-    msg["To"] = recipient
+    msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(text_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587)
+        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
-        logger.info("Approval email sent for %s to %s", new_user_email, recipient)
+        logger.info("Approval email sent for %s to %s", new_user_email, recipients)
+        return True, ""
     except Exception as e:
-        print("Approval mail error:", e)
+        logger.error("Approval mail error for %s: %s", new_user_email, e)
+        return False, str(e)
 
 
 def send_account_approved_email(user_email):
@@ -4400,7 +4592,7 @@ def send_account_approved_email(user_email):
 
     if not sender or not password:
         logger.warning("Approval confirmation mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
-        return False
+        return False, "EMAIL_USER/EMAIL_PASSWORD saknas"
 
     body = f"""
 Hej,
@@ -4419,16 +4611,16 @@ Välkommen!
     msg["To"] = user_email
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587)
+        server = smtplib.SMTP("smtp.office365.com", 587, timeout=20)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
         logger.info("ACCOUNT APPROVAL MAIL SENT TO: %s", user_email)
-        return True
+        return True, ""
     except Exception as ex:
         logger.error("Account approval mail error for %s: %s", user_email, ex)
-        return False
+        return False, str(ex)
 
 # ===== ALERT FUNCTION =====
 def send_alert(email, message, alert_type="GENERAL"):
@@ -5032,8 +5224,11 @@ def dashboard():
             target = (request.form.get("admin_approve") or "").strip()
             status = approve_pending_user(target) if target else "not_found"
             if status == "approved":
-                send_account_approved_email(target.strip().lower())
-                session["users_msg"] = f"✅ Godkände {target} och skickade godkännandemail"
+                ok, err = send_account_approved_email(target.strip().lower())
+                if ok:
+                    session["users_msg"] = f"✅ Godkände {target} och skickade godkännandemail"
+                else:
+                    session["users_msg"] = f"✅ Godkände {target}, men kunde inte skicka godkännandemail ({err})"
             elif status == "already_registered":
                 session["users_msg"] = f"ℹ️ {target} är redan registrerad"
             else:
