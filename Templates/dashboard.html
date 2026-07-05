@@ -167,6 +167,97 @@
             line-height: 1.5;
         }
 
+        .info-panel {
+            margin-top: 10px;
+        }
+
+        .info-toggle {
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--button-border);
+            border-radius: 999px;
+            padding: 7px 14px;
+            background: rgba(15, 23, 42, 0.9);
+            color: var(--text-color);
+            text-decoration: none;
+            font-size: 0.86rem;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+
+        .info-toggle:hover {
+            background: rgba(112, 224, 0, 0.18);
+            border-color: rgba(112, 224, 0, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .info-toggle::-webkit-details-marker {
+            display: none;
+        }
+
+        .info-panel[open] .info-toggle {
+            background: rgba(112, 224, 0, 0.18);
+            border-color: rgba(112, 224, 0, 0.5);
+        }
+
+        .info-card {
+            margin-top: 10px;
+            border: 1px solid rgba(125, 211, 252, 0.26);
+            border-radius: 12px;
+            background: radial-gradient(circle at 15% 15%, rgba(112, 224, 0, 0.12), transparent 30%),
+                radial-gradient(circle at 85% 10%, rgba(244, 180, 0, 0.10), transparent 26%),
+                rgba(8, 18, 42, 0.92);
+            padding: 12px 14px;
+            color: #dbeafe;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+
+        .info-card-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .info-card-logo {
+            width: 42px;
+            height: 42px;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.26);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+            flex: 0 0 auto;
+        }
+
+        .info-card-subtitle {
+            margin: 0;
+            font-size: 0.8rem;
+            color: #bcd0e6;
+        }
+
+        .info-card h4 {
+            margin: 0 0 8px;
+            font-size: 0.9rem;
+            color: #f8fafc;
+        }
+
+        .info-card ol {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .info-card li {
+            margin-bottom: 8px;
+        }
+
+        .info-card li:last-child {
+            margin-bottom: 0;
+        }
+
         .brand-logo {
             display: block;
             width: min(320px, 70vw);
@@ -1308,6 +1399,32 @@
                         <p>Plattformen genomför inga verkliga köp eller försäljningar. Alla investeringar måste
                             genomföras via din egen bank eller handelsplattform.</p>
                         <p>Alla rekommendationer är endast beslutsstöd och ska inte ses som finansiell rådgivning.</p>
+
+                        <details class="info-panel">
+                            <summary class="info-toggle">Info</summary>
+                            <div class="info-card">
+                                <div class="info-card-head">
+                                    <img class="info-card-logo" src="/logo.png" alt="Bulleye logga">
+                                    <div>
+                                        <h4>Checklista: sa hanterar du den teoretiska plattformen</h4>
+                                        <p class="info-card-subtitle">Samma visuella format som resten av BullEye.</p>
+                                    </div>
+                                </div>
+                                <ol>
+                                    <li>Gå till Dashboard och se vad AI rekommenderar att köpa.</li>
+                                    <li>Öppna din bank eller handelsplattform och genomför köpen där i verkligheten med
+                                        samma antal som AI visar.</li>
+                                    <li>Gå tillbaka till BullEye och tryck på "Köp allt AI rekommenderar" för att spegla
+                                        dina verkliga köp i den teoretiska portföljen.</li>
+                                    <li>Om du köper enstaka tillgångar: gör verkligt köp först, registrera sedan enskilt
+                                        köp i BullEye för samma tillgång och antal.</li>
+                                    <li>För Portfolio-hantering (sälj/minska/öka): utför alltid ordern först i din
+                                        handelsplattform och uppdatera sedan motsvarande innehav i BullEye.</li>
+                                    <li>Använd BullEye som beslutsstod och uppföljning. Verkliga pengar hanteras alltid
+                                        i din externa handelsplattform.</li>
+                                </ol>
+                            </div>
+                        </details>
                     </div>
                     <div class="selected-platforms">
                         Valda handelsplattformar:
