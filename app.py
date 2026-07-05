@@ -2803,6 +2803,37 @@ def login():
         box-shadow: 0 0 0 5px rgba(38, 255, 156, 0.12);
     }}
 
+    .password-wrap {{
+        position: relative;
+    }}
+
+    .password-wrap .password-input {{
+        padding-right: 54px;
+    }}
+
+    .toggle-password-btn {{
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 1px solid rgba(100, 175, 255, 0.2);
+        background: rgba(8, 18, 42, 0.95);
+        color: var(--muted);
+        border-radius: 10px;
+        width: 36px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+    }}
+
+    .toggle-password-btn:hover {{
+        color: var(--text);
+        border-color: rgba(112, 224, 0, 0.42);
+    }}
+
     .button-row {{ display: flex; gap: 12px; flex-wrap: wrap; }}
 
     .button-primary,
@@ -2875,7 +2906,10 @@ def login():
                     </div>
                     <div class="field-group">
                         <label>Lösenord</label>
-                        <input type="password" name="password" required>
+                        <div class="password-wrap">
+                            <input id="login-password" class="password-input" type="password" name="password" required>
+                            <button type="button" class="toggle-password-btn" data-target="login-password" aria-label="Visa lösenord">👁</button>
+                        </div>
                     </div>
                     <div class="button-row" style="margin-top: 8px;">
                         <button class="button-primary" type="submit" name="action" value="login">Logga in</button>
@@ -2890,6 +2924,21 @@ def login():
             </div>
         </div>
     </div>
+
+    <script>
+    document.querySelectorAll('.toggle-password-btn').forEach(function(btn) {{
+        btn.addEventListener('click', function() {{
+            const targetId = btn.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (!input) return;
+
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            btn.setAttribute('aria-label', showing ? 'Visa lösenord' : 'Dölj lösenord');
+            btn.textContent = showing ? '👁' : '🙈';
+        }});
+    }});
+    </script>
 
     </body>
     </html>
@@ -2926,7 +2975,7 @@ def register_account():
             hashed = hash_password(password)
             create_pending_user(entered_email, hashed, selected_platforms)
             send_approval_email(entered_email)
-            msg = "✅ Förfrågan skickad för godkännande"
+            msg = "✅ Konto är registrerat och inväntar godkännande"
             entered_email = ""
             selected_known = list(DEFAULT_TRADING_PLATFORMS)
             other_name = ""
@@ -3038,6 +3087,37 @@ def register_account():
         box-shadow: 0 0 0 5px rgba(38, 255, 156, 0.12);
     }}
 
+    .password-wrap {{
+        position: relative;
+    }}
+
+    .password-wrap .password-input {{
+        padding-right: 54px;
+    }}
+
+    .toggle-password-btn {{
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        border: 1px solid rgba(100, 175, 255, 0.2);
+        background: rgba(8, 18, 42, 0.95);
+        color: var(--muted);
+        border-radius: 10px;
+        width: 36px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+    }}
+
+    .toggle-password-btn:hover {{
+        color: var(--text);
+        border-color: rgba(112, 224, 0, 0.42);
+    }}
+
     .platform-picker {{
         border: 1px solid rgba(100, 175, 255, 0.16);
         border-radius: 14px;
@@ -3141,7 +3221,10 @@ def register_account():
                     </div>
                     <div class="field-group">
                         <label>Lösenord</label>
-                        <input type="password" name="password" required>
+                        <div class="password-wrap">
+                            <input id="register-password" class="password-input" type="password" name="password" required>
+                            <button type="button" class="toggle-password-btn" data-target="register-password" aria-label="Visa lösenord">👁</button>
+                        </div>
                     </div>
                     <div class="platform-picker">
                         <span>Välj handelsplattform(ar):</span>
@@ -3161,6 +3244,20 @@ def register_account():
             </div>
         </div>
     </div>
+    <script>
+    document.querySelectorAll('.toggle-password-btn').forEach(function(btn) {{
+        btn.addEventListener('click', function() {{
+            const targetId = btn.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (!input) return;
+
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            btn.setAttribute('aria-label', showing ? 'Visa lösenord' : 'Dölj lösenord');
+            btn.textContent = showing ? '👁' : '🙈';
+        }});
+    }});
+    </script>
     </body>
     </html>
     """
