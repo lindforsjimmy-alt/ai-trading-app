@@ -6589,23 +6589,12 @@ def dashboard():
     emergency_recommendations = False
 
     if not ranked:
-        if quick_bootstrap:
-            print("⚠️ AI-cache tom – supersnabb vy aktiv, laddar i bakgrunden")
-            ranked = []
-            ai_loading = True
-            ensure_ai_background_loading(ai_strategy, ai_risk, amount)
-        else:
-            print("⚠️ AI-cache tom – försöker direkt omkörning")
-            ranked = safe_fetch(lambda: run_daily_ai(ai_strategy, ai_risk, amount)) or []
-
-            if ranked:
-                print(f"✅ AI omkörning klar – laddade {len(ranked)} kandidater")
-            else:
-                print("⚠️ AI-scan gav inga kandidater – startar bakgrundsladdning + reservlista")
-                ensure_ai_background_loading(ai_strategy, ai_risk, amount)
-                ranked = build_emergency_recommendations(max(top_n, 5))
-                emergency_recommendations = bool(ranked)
-                ai_loading = not emergency_recommendations
+        # Never block a web request on full AI scan; load in background only.
+        print("⚠️ AI-cache tom – returnerar direkt och laddar AI i bakgrunden")
+        ensure_ai_background_loading(ai_strategy, ai_risk, amount)
+        ranked = build_emergency_recommendations(max(top_n, 5))
+        emergency_recommendations = bool(ranked)
+        ai_loading = not emergency_recommendations
 
     loss_blocked_tickers = get_loss_blocked_tickers(user) if block_loss_sells else set()
     ranked_for_recommendations = [s for s in ranked if s.get("t") not in loss_blocked_tickers]
