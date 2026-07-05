@@ -503,6 +503,73 @@
             flex-wrap: wrap;
         }
 
+        .portfolio-section {
+            position: relative;
+        }
+
+        .portfolio-section.sell-section {
+            border-color: rgba(248, 113, 113, 0.45);
+            background: linear-gradient(180deg, rgba(127, 29, 29, 0.16), rgba(15, 23, 42, 0.88));
+        }
+
+        .portfolio-section.buy-section {
+            border-color: rgba(112, 224, 0, 0.42);
+            background: linear-gradient(180deg, rgba(22, 101, 52, 0.16), rgba(15, 23, 42, 0.88));
+        }
+
+        .portfolio-section.wait-section {
+            border-color: rgba(251, 191, 36, 0.42);
+            background: linear-gradient(180deg, rgba(133, 77, 14, 0.16), rgba(15, 23, 42, 0.88));
+        }
+
+        .section-heading-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .section-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            border: 1px solid transparent;
+        }
+
+        .section-badge.sell {
+            color: #fecaca;
+            background: rgba(248, 113, 113, 0.14);
+            border-color: rgba(248, 113, 113, 0.36);
+        }
+
+        .section-badge.buy {
+            color: #bbf7d0;
+            background: rgba(112, 224, 0, 0.16);
+            border-color: rgba(112, 224, 0, 0.36);
+        }
+
+        .section-badge.wait {
+            color: #fde68a;
+            background: rgba(251, 191, 36, 0.14);
+            border-color: rgba(251, 191, 36, 0.34);
+        }
+
+        .section-guide {
+            margin: 0 0 14px;
+            font-size: 0.86rem;
+            line-height: 1.45;
+            color: #c8d7ea;
+        }
+
+        .section-guide strong {
+            color: #f8fafc;
+        }
+
         .trade-row input {
             width: 100%;
             padding: 8px 12px;
@@ -1702,8 +1769,12 @@
         </form>
 
         <div class="container" style="margin-top:20px;">
-            <div class="box">
-                <h3>📉 Sälj</h3>
+            <div class="box portfolio-section sell-section">
+                <div class="section-heading-row">
+                    <h3>📉 Sälj</h3>
+                    <span class="section-badge sell">Säljläge</span>
+                </div>
+                <p class="section-guide"><strong>Fokus:</strong> minska risk och ta hem vinst enligt AI-signal.</p>
                 {% if sell_list %}
                 {% for s in sell_list %}
                 <div class="asset-box">
@@ -1744,8 +1815,12 @@
                 {% endif %}
             </div>
 
-            <div class="box">
-                <h3>📈 Köp mer</h3>
+            <div class="box portfolio-section buy-section">
+                <div class="section-heading-row">
+                    <h3>📈 Köp mer</h3>
+                    <span class="section-badge buy">Köpläge</span>
+                </div>
+                <p class="section-guide"><strong>Fokus:</strong> öka i positioner där AI ser fortsatt uppsida.</p>
                 {% if buy_more_list %}
                 {% for s in buy_more_list %}
                 <div class="asset-box">
@@ -1774,6 +1849,9 @@
                             <button type="submit" name="buy_{{ s.t }}"
                                 style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.28);">Köp</button>
                         </div>
+                        <div style="margin-top:6px; font-size:0.86rem; color:#93c5fd;">
+                            AI rekommenderar köp mer: {{ s.recommended_buy_qty if s.recommended_buy_qty else 0 }}
+                        </div>
                     </form>
 
                     <form method="POST" style="margin-top: 10px;">
@@ -1791,8 +1869,13 @@
                 {% endif %}
             </div>
 
-            <div class="box">
-                <h3>⏸️ Avvakta</h3>
+            <div class="box portfolio-section wait-section">
+                <div class="section-heading-row">
+                    <h3>⏸️ Avvakta</h3>
+                    <span class="section-badge wait">Neutral</span>
+                </div>
+                <p class="section-guide"><strong>Fokus:</strong> svag signal. köp eller sälj bara vid tydligt beslut.
+                </p>
                 {% if wait_list %}
                 {% for s in wait_list %}
                 <div class="asset-box">
@@ -1820,6 +1903,9 @@
                             <input type="number" name="buyqty_{{ s.t }}" placeholder="Antal" min="0" value="0" required>
                             <button type="submit" name="buy_{{ s.t }}"
                                 style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.28);">Köp</button>
+                        </div>
+                        <div style="margin-top:6px; font-size:0.86rem; color:#93c5fd;">
+                            AI rekommenderar köp mer: {{ s.recommended_buy_qty if s.recommended_buy_qty else 0 }}
                         </div>
                     </form>
 
