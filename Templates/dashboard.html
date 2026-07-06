@@ -2400,7 +2400,27 @@
                 <input type="hidden" name="active_tab" value="ai_background">
 
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(125, 211, 252, 0.28);">
-                    <b>API Budget Health</b><br>
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>API Budget Health</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om API Budget Health">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>API Budget Health</strong><br><br>
+                                Visar hur hårt bakgrundsscannen belastar dina API-gränser just nu.<br><br>
+                                <strong>Nycklar:</strong><br>
+                                - <strong>Risknivå</strong>: låg/medel/hög risk för rate-limit.<br>
+                                - <strong>Quote pressure</strong>: uppskattad andel av tillgänglig budget per timme.<br>
+                                - <strong>Rekommendation</strong>: föreslaget intervall/profil för säkrare
+                                drift.<br><br>
+                                <strong>Om du ändrar inställningar:</strong><br>
+                                - Kortare intervall eller större scan => högre API-tryck.<br>
+                                - Längre intervall eller gratis-API profil => lägre API-tryck.
+                            </div>
+                        </div>
+                    </div>
                     <span style="color: var(--muted); font-size:0.9rem;">
                         Risknivå:
                         {% if api_budget_health.risk_level == "high" %}
@@ -2423,7 +2443,25 @@
                 </div>
 
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(112, 224, 0, 0.30);">
-                    <b>Learning Status</b><br>
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Learning Status</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(112, 224, 0, 0.2); border:1px solid rgba(112, 224, 0, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Learning Status">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Learning Status</strong><br><br>
+                                Visar hur AI:n faktiskt presterar baserat på utvärderade rekommendationer.<br><br>
+                                <strong>Nycklar:</strong><br>
+                                - <strong>Träningsutfall / Win-rate</strong>: andel lyckade signaler.<br>
+                                - <strong>Avg move</strong>: genomsnittlig rörelse i utfall.<br>
+                                - <strong>Multipliers</strong>: hur mycket systemet justerar nyhets- och
+                                rotationsvikt.<br>
+                                - <strong>Horisonter</strong>: resultat per tidsfönster (n och win-rate).
+                            </div>
+                        </div>
+                    </div>
                     <span style="color: var(--muted); font-size:0.9rem;">
                         {% if learning_status.has_data %}
                         Träningsutfall: <b>{{ learning_status.total_outcomes }}</b> | Win-rate: <b>{{
@@ -2445,7 +2483,24 @@
                 </div>
 
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(56, 189, 248, 0.30);">
-                    <b>Learning Progress</b><br>
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Learning Progress</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Learning Progress">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Learning Progress</strong><br><br>
+                                Visar mognadsnivå i inlärningen, inte bara senaste resultat.<br><br>
+                                <strong>Nycklar:</strong><br>
+                                - <strong>Mognad</strong>: hur långt träningsloopen kommit.<br>
+                                - <strong>Datatäckning</strong>: hur nära målvolym av utfall du är.<br>
+                                - <strong>Stabilitet</strong>: hur jämn kvaliteten är över tid.<br><br>
+                                Högre progress brukar ge mer robusta rekommendationer med mindre brus.
+                            </div>
+                        </div>
+                    </div>
                     <span style="color: var(--muted); font-size:0.9rem;">
                         Mognad: <b>{{ learning_progress.stage }}</b> ({{ learning_progress.maturity_score }}%)<br>
                         Utfall: <b>{{ learning_progress.total_outcomes }}</b> av mål <b>{{
@@ -2457,7 +2512,22 @@
                 </div>
 
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(244, 180, 0, 0.30);">
-                    <b>Instruktion: Outcome Horizons</b><br>
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Instruktion: Outcome Horizons</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(244, 180, 0, 0.2); border:1px solid rgba(244, 180, 0, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Outcome Horizons">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Outcome Horizons</strong><br><br>
+                                Anger efter hur många timmar en rekommendation ska utvärderas.<br><br>
+                                <strong>Kort</strong> (3,6,12h): snabb feedback, mer brus.<br>
+                                <strong>Mix</strong> (6,24,72h): balans mellan tempo och stabilitet.<br>
+                                <strong>Swing</strong> (24,48,72h): långsammare men ofta stabilare signal.
+                            </div>
+                        </div>
+                    </div>
                     <span style="color: var(--muted); font-size:0.9rem;">
                         Aktiv preset: <b>{{ outcome_preset_key|upper }}</b> | Aktiva horisonter: <b>{{
                             outcome_horizons|join(', ') }}h</b>.<br>
@@ -2499,8 +2569,62 @@
                     </button>
                 </div>
 
+                <div style="display:flex; justify-content:flex-end;">
+                    <details class="info-panel" style="width:min(100%, 580px);">
+                        <summary class="info-toggle">Info om AI Drift-inställningar</summary>
+                        <div class="info-card">
+                            <h4>Vad inställningarna betyder</h4>
+                            <ol>
+                                <li><b>Intervall (sekunder)</b>: hur ofta bakgrundsscannen körs. Kortare intervall ger
+                                    snabbare uppdateringar men högre API-belastning.</li>
+                                <li><b>Strategi</b>: vilken marknadshorisont scannen prioriterar. Kort fokuserar mer på
+                                    snabba rörelser, Lång mer på uthålliga trender, Balans ligger mellan.</li>
+                                <li><b>Riskprofil</b>: hur offensivt urvalet blir. Låg brukar ge stabilare kandidater,
+                                    Hög tar mer volatilitet för större uppsida.</li>
+                                <li><b>Kapital för scan (USD)</b>: simulerad kapitalnivå AI optimerar urval/allokering
+                                    mot. Det är inte ett riktigt köp.</li>
+                            </ol>
+
+                            <h4>Hur detta påverkar Dashboard och Portfolio</h4>
+                            <ol>
+                                <li><b>Dashboard (AI Aktieval)</b>: AI Drift påverkar vilka kandidater och signaler som
+                                    fyller listorna över tid.</li>
+                                <li><b>Dashboard-val per körning</b>: dina val i Dashboard (t.ex.
+                                    strategi/risk/top_n/prioritet) styr den aktuella manuella analysen och kan
+                                    tillfälligt skilja sig från bakgrundsprofilen.</li>
+                                <li><b>Portfolio</b>: Portfolio-strategi/risk styr beslut på dina innehav (sälj/köp
+                                    mer/avvakta) och är separat från AI Drift, men underlaget blir bättre när
+                                    bakgrundsscannen är välkalibrerad.</li>
+                                <li><b>Praktiskt råd</b>: håll AI Drift och dina manuella val någorlunda i linje för mer
+                                    konsekventa rekommendationer.</li>
+                            </ol>
+                        </div>
+                    </details>
+                </div>
+
                 <label>
-                    Intervall (sekunder):<br>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Intervall (sekunder):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om full scan">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Tvinga ny full scan varje körning</strong><br><br>
+                                När checkboxen är <strong>på</strong> ignorerar systemet mer cache/spår och kör en ny
+                                bred scan vid varje intervall.<br><br>
+                                <strong>Det innebär:</strong><br>
+                                - Färskare kandidater och snabbare reaktion på marknadsskiften.<br>
+                                - Högre API-belastning och större risk för rate-limit på gratisnivå.<br>
+                                - Ofta mer variation i rekommendationer mellan körningar.<br><br>
+                                När checkboxen är <strong>av</strong> återanvänds mer tidigare resultat/cache, vilket
+                                ger lägre API-tryck och ofta stabilare kandidater.<br><br>
+                                <strong>Praktiskt:</strong><br>
+                                - Gratis-API: låt den oftast vara av, och använd längre intervall.<br>
+                                - Aktiv marknad/nyheter: slå på tillfälligt för snabbare omtag.
+                            </div>
+                        </div>
+                    </div>
                     <input type="number" min="60" max="86400" step="60" name="ai_background_interval_seconds"
                         value="{{ ai_background_settings.ai_background_interval_seconds }}">
                 </label>
