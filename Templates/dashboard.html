@@ -1607,6 +1607,10 @@
                 class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <use href="#icon-target"></use>
             </svg>AI Drift</button>
+        <button class="tab-button" data-tab="8d_reports" onclick="showTab('8d_reports', this)"><svg class="ui-icon"
+                style="color:#f472b6;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-target"></use>
+            </svg>8D-rapporter</button>
         <button class="tab-button" data-tab="users" onclick="showTab('users', this)"><svg class="ui-icon"
                 style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <use href="#icon-users"></use>
@@ -1964,6 +1968,34 @@
                 <path d="M9 12.5h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
             </svg>Portfolio</h2>
 
+        {% if portfolio_summary %}
+        <div class="asset-box" style="margin:12px 0 16px; border-color: rgba(125, 211, 252, 0.28);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                <b>Portfolio nu</b>
+                <button type="button" onclick="togglePopup(this)"
+                    style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                <div class="ai-popup" role="dialog" aria-label="Info om Portfolio nu">
+                    <button type="button" onclick="closePopup(this)">Stäng</button>
+                    <div>
+                        <strong>Portfolio nu</strong><br><br>
+                        Visar den totala vinst/förlusten för alla öppna innehav, både i kronor och procent.<br><br>
+                        Grönt betyder att hela portföljen ligger plus. Rött betyder att den ligger minus.
+                    </div>
+                </div>
+            </div>
+            <div style="color: var(--muted); font-size:0.95rem; line-height:1.6;">
+                Innehav: <b>{{ portfolio_summary.count }}</b><br>
+                Totalt investerat: <b>{{ '%.2f' % portfolio_summary.total_cost }} USD</b><br>
+                Nuvarande värde: <b>{{ '%.2f' % portfolio_summary.total_value }} USD</b><br>
+                Total P/L: <b style="color:{% if portfolio_summary.is_positive %}#70E000{% else %}#f87171{% endif %};">
+                    {{ '+' if portfolio_summary.total_pl >= 0 else '' }}{{ '%.2f' % portfolio_summary.total_pl }} USD
+                </b>
+                (<b style="color:{% if portfolio_summary.is_positive %}#70E000{% else %}#f87171{% endif %};">{{ '+' if
+                    portfolio_summary.total_pl_pct >= 0 else '' }}{{ '%.2f' % portfolio_summary.total_pl_pct }}%</b>)
+            </div>
+        </div>
+        {% endif %}
+
         <form method="POST">
 
             Strategi:<br>
@@ -2023,10 +2055,27 @@
                 {% if sell_list %}
                 {% for s in sell_list %}
                 <div class="asset-box">
-                    <b>{{ s.display_name or s.t }}</b><br>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <b>{{ s.display_name or s.t }}</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om innehav {{ s.t }}">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>{{ s.display_name or s.t }}</strong><br><br>
+                                Inköp: {{ '%.2f' % s.avg_price }} USD<br>
+                                Nupris: {{ '%.2f' % s.price }} USD<br>
+                                Totalt investerat: {{ '%.2f' % s.cost }} USD<br>
+                                Nuvarande värde: {{ '%.2f' % s.current_value }} USD<br>
+                                P/L: {{ '+' if s.pl >= 0 else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else
+                                '' }}{{ '%.1f' % s.pl_pct }}%)
+                            </div>
+                        </div>
+                    </div>
                     Qty: {{ s.qty }} | Inköp: {{ '%.2f' % s.avg_price }} USD | Pris: {{ '%.2f' % s.price }} USD<br>
-                    P/L: <span style="color: {% if s.pl_pct > 0 %}#70E000{% else %}#f87171{% endif %};">{{ '%.1f' %
-                        s.pl_pct }}%</span><br>
+                    P/L: <span style="color: {% if s.pl >= 0 %}#70E000{% else %}#f87171{% endif %};">{{ '+' if s.pl >= 0
+                        else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else '' }}{{ '%.1f' % s.pl_pct
+                        }}%)</span><br>
                     Orsak: <span style="font-size:0.9rem;">{{ s.reason }}</span><br><br>
                     {% if s.sell_recommendation_text %}
                     <span style="font-size:0.86rem; color:#93c5fd;">{{ s.sell_recommendation_text }}</span><br><br>
@@ -2072,10 +2121,27 @@
                 {% if buy_more_list %}
                 {% for s in buy_more_list %}
                 <div class="asset-box">
-                    <b>{{ s.display_name or s.t }}</b><br>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <b>{{ s.display_name or s.t }}</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om innehav {{ s.t }}">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>{{ s.display_name or s.t }}</strong><br><br>
+                                Inköp: {{ '%.2f' % s.avg_price }} USD<br>
+                                Nupris: {{ '%.2f' % s.price }} USD<br>
+                                Totalt investerat: {{ '%.2f' % s.cost }} USD<br>
+                                Nuvarande värde: {{ '%.2f' % s.current_value }} USD<br>
+                                P/L: {{ '+' if s.pl >= 0 else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else
+                                '' }}{{ '%.1f' % s.pl_pct }}%)
+                            </div>
+                        </div>
+                    </div>
                     Qty: {{ s.qty }} | Inköp: {{ '%.2f' % s.avg_price }} USD | Pris: {{ '%.2f' % s.price }} USD<br>
-                    P/L: <span style="color: {% if s.pl_pct > 0 %}#70E000{% else %}#f87171{% endif %};">{{ '%.1f' %
-                        s.pl_pct }}%</span><br>
+                    P/L: <span style="color: {% if s.pl >= 0 %}#70E000{% else %}#f87171{% endif %};">{{ '+' if s.pl >= 0
+                        else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else '' }}{{ '%.1f' % s.pl_pct
+                        }}%)</span><br>
                     Orsak: <span style="font-size:0.9rem;">{{ s.reason }}</span><br><br>
 
                     <button onclick="togglePopup(this)">AI Analys</button>
@@ -2130,10 +2196,27 @@
                 {% if wait_list %}
                 {% for s in wait_list %}
                 <div class="asset-box">
-                    <b>{{ s.display_name or s.t }}</b><br>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <b>{{ s.display_name or s.t }}</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om innehav {{ s.t }}">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>{{ s.display_name or s.t }}</strong><br><br>
+                                Inköp: {{ '%.2f' % s.avg_price }} USD<br>
+                                Nupris: {{ '%.2f' % s.price }} USD<br>
+                                Totalt investerat: {{ '%.2f' % s.cost }} USD<br>
+                                Nuvarande värde: {{ '%.2f' % s.current_value }} USD<br>
+                                P/L: {{ '+' if s.pl >= 0 else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else
+                                '' }}{{ '%.1f' % s.pl_pct }}%)
+                            </div>
+                        </div>
+                    </div>
                     Qty: {{ s.qty }} | Inköp: {{ '%.2f' % s.avg_price }} USD | Pris: {{ '%.2f' % s.price }} USD<br>
-                    P/L: <span style="color: {% if s.pl_pct > 0 %}#70E000{% else %}#f87171{% endif %};">{{ '%.1f' %
-                        s.pl_pct }}%</span><br>
+                    P/L: <span style="color: {% if s.pl >= 0 %}#70E000{% else %}#f87171{% endif %};">{{ '+' if s.pl >= 0
+                        else '' }}{{ '%.2f' % s.pl }} USD ({{ '+' if s.pl_pct >= 0 else '' }}{{ '%.1f' % s.pl_pct
+                        }}%)</span><br>
                     Orsak: <span style="font-size:0.9rem;">{{ s.reason }}</span><br><br>
 
                     <button onclick="togglePopup(this)">AI Analys</button>
@@ -2396,6 +2479,13 @@
                 {% endif %}
                 ({{ learning_storage_status.detail }}).
             </p>
+            <div class="selection-note" style="margin:0 0 10px; display:grid; gap:4px;">
+                <div><b>Senaste lyckade scan:</b> {{ ai_runtime_status.last_success }} | <b>Nästa planerade:</b> {{
+                    ai_runtime_status.next_run }}</div>
+                <div><b>Senaste körning:</b> {{ ai_runtime_status.last_run }} | <b>Körningstid:</b> {{
+                    ai_runtime_status.last_duration_sec }}s | <b>Throttle:</b> {% if
+                    ai_runtime_status.last_run_throttled %}Ja{% else %}Nej{% endif %}</div>
+            </div>
             <form method="POST" style="display:grid; gap:10px; max-width:580px;">
                 <input type="hidden" name="active_tab" value="ai_background">
 
@@ -2482,6 +2572,37 @@
                     </span>
                 </div>
 
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(251, 191, 36, 0.32);">
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Learning Guardrails</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(251, 191, 36, 0.18); border:1px solid rgba(251, 191, 36, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Learning Guardrails">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Learning Guardrails</strong><br><br>
+                                Skyddar mot att lärning går direkt från historik till live-promotion utan tillräckligt
+                                stöd.<br><br>
+                                Rekommenderat startläge: safe mode på, 60 outcomes och 58.0% win-rate.<br><br>
+                                När safe mode är aktivt krävs både tillräckligt många outcomes och en godkänd win-rate
+                                innan ny self-correction får promotoras.
+                            </div>
+                        </div>
+                    </div>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        Safe mode: <b>{% if learning_guardrails.safe_mode_enabled %}På{% else %}Av{% endif %}</b><br>
+                        Promotion: <b>{% if learning_guardrails.promotion_allowed %}Tillåten{% else %}Blockerad{% endif
+                            %}</b><br>
+                        Trösklar: <b>{{ learning_guardrails.promotion_min_samples }}</b> outcomes och <b>{{
+                            learning_guardrails.promotion_min_win_rate }}%</b> win-rate<br>
+                        Nuvarande läge: <b>{% if learning_guardrails.uses_baseline %}Baseline / shadow{% else
+                            %}Live-promotion{% endif %}</b><br>
+                        Rekommenderat: <b>60</b> outcomes, <b>58.0%</b> win-rate, safe mode <b>På</b><br>
+                        Skäl: {{ learning_guardrails.promotion_reason }}
+                    </span>
+                </div>
+
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(56, 189, 248, 0.30);">
                     <div
                         style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
@@ -2508,6 +2629,131 @@
                             learning_progress.sample_progress }}%</b> | Stabilitet: <b>{{
                             learning_progress.stability }}%</b><br>
                         {{ learning_progress.stage_text }}
+                    </span>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(147, 197, 253, 0.30);">
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Scan Status</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(147, 197, 253, 0.2); border:1px solid rgba(147, 197, 253, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Scan Status">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Scan Status</strong><br><br>
+                                Visar när AI senast körde, om den lyckades, när nästa körning är planerad och om
+                                auto-throttle just nu är aktiv.<br><br>
+                                Det här är ren intern driftinfo, så den kostar inga extra API-anrop.<br><br>
+                                Knappen <strong>Kör AI nu</strong> under formen triggar en manuell refresh utan att du
+                                behöver vänta på intervallet.
+                            </div>
+                        </div>
+                    </div>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        Senaste körning: <b>{{ ai_runtime_status.last_run }}</b> | Senaste lyckade: <b>{{
+                            ai_runtime_status.last_success }}</b><br>
+                        Senaste fel: <b>{{ ai_runtime_status.last_failure }}</b> | Nästa planerade: <b>{{
+                            ai_runtime_status.next_run }}</b><br>
+                        Senaste körningstid: <b>{{ ai_runtime_status.last_duration_sec }}</b>s | Antal kandidater: <b>{{
+                            ai_runtime_status.last_run_count }}</b><br>
+                        Läget: <b>{{ ai_runtime_status.last_run_mode }}</b> | Strategi: <b>{{
+                            ai_runtime_status.last_run_strategy }}</b> | Risk: <b>{{ ai_runtime_status.last_run_risk
+                            }}</b><br>
+                        Throttle: <b>{% if ai_runtime_status.last_run_throttled %}Ja{% else %}Nej{% endif %}</b><br>
+                        Feltext: {{ ai_runtime_status.last_error }}
+                    </span>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(167, 243, 208, 0.30);">
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Quality Overview</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(167, 243, 208, 0.2); border:1px solid rgba(167, 243, 208, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Quality Overview">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Quality Overview</strong><br><br>
+                                Visar snabb intern kvalitet per strategi, riskprofil och horisont baserat på utfall som
+                                redan loggats.<br><br>
+                                De små staplarna visar win-rate för topp 3 i varje grupp, så du kan se vilka profiler
+                                som fungerar bäst utan extra API-kostnad.
+                            </div>
+                        </div>
+                    </div>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        {% if ai_quality_overview.has_data %}
+                        {{ ai_quality_overview.summary }}<br>
+                        <div
+                            style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-top:8px;">
+                            <div
+                                style="border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:8px; background: rgba(255,255,255,0.03);">
+                                <b style="display:block; margin-bottom:6px; color:var(--text);">Top strategier</b>
+                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                                    {% for row in ai_quality_overview.top_by_strategy[:3] %}
+                                    <tr>
+                                        <td style="padding:3px 4px 3px 0; white-space:nowrap;">{{ row.label }}</td>
+                                        <td style="padding:3px 4px; width:100%;">
+                                            <div
+                                                style="height:8px; border-radius:999px; background: rgba(56, 189, 248, 0.14); overflow:hidden;">
+                                                <div
+                                                    style="height:100%; width:{{ row.win_rate_pct }}%; background: linear-gradient(90deg, rgba(112, 224, 0, 0.9), rgba(56, 189, 248, 0.9));">
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td style="padding:3px 0 3px 4px; white-space:nowrap; text-align:right;">{{
+                                            row.win_rate_pct }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </table>
+                            </div>
+                            <div
+                                style="border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:8px; background: rgba(255,255,255,0.03);">
+                                <b style="display:block; margin-bottom:6px; color:var(--text);">Top risk</b>
+                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                                    {% for row in ai_quality_overview.top_by_risk[:3] %}
+                                    <tr>
+                                        <td style="padding:3px 4px 3px 0; white-space:nowrap;">{{ row.label }}</td>
+                                        <td style="padding:3px 4px; width:100%;">
+                                            <div
+                                                style="height:8px; border-radius:999px; background: rgba(244, 180, 0, 0.14); overflow:hidden;">
+                                                <div
+                                                    style="height:100%; width:{{ row.win_rate_pct }}%; background: linear-gradient(90deg, rgba(244, 180, 0, 0.9), rgba(112, 224, 0, 0.9));">
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td style="padding:3px 0 3px 4px; white-space:nowrap; text-align:right;">{{
+                                            row.win_rate_pct }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </table>
+                            </div>
+                            <div
+                                style="border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:8px; background: rgba(255,255,255,0.03);">
+                                <b style="display:block; margin-bottom:6px; color:var(--text);">Top horisont</b>
+                                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                                    {% for row in ai_quality_overview.top_by_horizon[:3] %}
+                                    <tr>
+                                        <td style="padding:3px 4px 3px 0; white-space:nowrap;">{{ row.label }}h</td>
+                                        <td style="padding:3px 4px; width:100%;">
+                                            <div
+                                                style="height:8px; border-radius:999px; background: rgba(147, 197, 253, 0.14); overflow:hidden;">
+                                                <div
+                                                    style="height:100%; width:{{ row.win_rate_pct }}%; background: linear-gradient(90deg, rgba(147, 197, 253, 0.95), rgba(112, 224, 0, 0.9));">
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td style="padding:3px 0 3px 4px; white-space:nowrap; text-align:right;">{{
+                                            row.win_rate_pct }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </table>
+                            </div>
+                        </div>
+                        {% else %}
+                        {{ ai_quality_overview.summary }}
+                        {% endif %}
                     </span>
                 </div>
 
@@ -2546,7 +2792,22 @@
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
                     <label style="display:grid; gap:6px; min-width:220px;">
-                        <span style="color: var(--muted); font-size:0.9rem;">Välj Outcome-preset</span>
+                        <span style="display:flex; align-items:center; gap:8px; color: var(--muted); font-size:0.9rem;">
+                            <span>Välj Outcome-preset</span>
+                            <button type="button" onclick="togglePopup(this)"
+                                style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                            <div class="ai-popup" role="dialog" aria-label="Info om Outcome-preset">
+                                <button type="button" onclick="closePopup(this)">Stäng</button>
+                                <div>
+                                    <strong>Outcome-preset</strong><br><br>
+                                    Väljer vilka tidshorisonter som används för att utvärdera rekommendationers
+                                    utfall.<br><br>
+                                    - <strong>Kort</strong>: snabbare feedback, mer brus.<br>
+                                    - <strong>Mix</strong>: balans mellan tempo och stabilitet.<br>
+                                    - <strong>Swing</strong>: långsammare men ofta stabilare signal.
+                                </div>
+                            </div>
+                        </span>
                         <select name="outcome_preset">
                             <option value="short" {% if outcome_preset_key=="short" %}selected{% endif %}>Kort (3,6,12h)
                             </option>
@@ -2605,13 +2866,38 @@
                 <label>
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
                         <span>Intervall (sekunder):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Intervall">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Intervall (sekunder)</strong><br><br>
+                                Styr hur ofta bakgrundsscannen körs.<br><br>
+                                Kortare intervall = snabbare uppdateringar men högre API-belastning.<br>
+                                Längre intervall = lägre API-belastning och ofta stabilare drift.
+                            </div>
+                        </div>
                     </div>
                     <input type="number" min="60" max="86400" step="60" name="ai_background_interval_seconds"
                         value="{{ ai_background_settings.ai_background_interval_seconds }}">
                 </label>
 
                 <label>
-                    Strategi:<br>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Strategi:</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Strategi">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Strategi</strong><br><br>
+                                Väljer tidshorisont för urvalet i bakgrundsscannen.<br><br>
+                                - <strong>Kort</strong>: mer kortsiktig momentum/reversion.<br>
+                                - <strong>Lång</strong>: mer trenduthållighet.<br>
+                                - <strong>Balans</strong>: mix av båda.
+                            </div>
+                        </div>
+                    </div>
                     <select name="ai_background_strategy">
                         <option value="short" {% if ai_background_settings.ai_background_strategy=="short" %}selected{%
                             endif %}>Kort</option>
@@ -2623,7 +2909,21 @@
                 </label>
 
                 <label>
-                    Riskprofil:<br>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Riskprofil:</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Riskprofil">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Riskprofil</strong><br><br>
+                                Styr hur offensivt kandidater prioriteras.<br><br>
+                                - <strong>Låg</strong>: mer defensivt urval.<br>
+                                - <strong>Medel</strong>: balanserad aggressivitet.<br>
+                                - <strong>Hög</strong>: mer volatilitet för potentiellt högre uppsida.
+                            </div>
+                        </div>
+                    </div>
                     <select name="ai_background_risk">
                         <option value="low" {% if ai_background_settings.ai_background_risk=="low" %}selected{% endif
                             %}>Låg</option>
@@ -2635,9 +2935,134 @@
                 </label>
 
                 <label>
-                    Kapital för scan (USD):<br>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Kapital för scan (USD):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om Kapital för scan">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Kapital för scan (USD)</strong><br><br>
+                                Simulerad kapitalnivå AI använder vid urval/allokering i bakgrundsscannen.<br><br>
+                                Det är inte ett riktigt köp, utan en styrparameter för analysens storleksantagande.
+                            </div>
+                        </div>
+                    </div>
                     <input type="number" min="100" max="10000000" step="100" name="ai_background_capital"
                         value="{{ ai_background_settings.ai_background_capital }}">
+                </label>
+
+                <label>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Whitelist symboler (komma-separerat):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om whitelist">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Whitelist</strong><br><br>
+                                Lämna tomt för att låta AI scanna hela universum. Fyll i tickers om du vill låsa scannen
+                                till en liten privat lista.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="text" name="ai_background_whitelist"
+                        value="{{ ai_background_settings.ai_background_whitelist|join(', ') }}"
+                        placeholder="AAPL, MSFT, TSLA">
+                </label>
+
+                <label>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Blacklist symboler (komma-separerat):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om blacklist">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Blacklist</strong><br><br>
+                                Tickrar här kommer alltid filtreras bort även om de råkar finnas i universum eller
+                                whitelist.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="text" name="ai_background_blacklist"
+                        value="{{ ai_background_settings.ai_background_blacklist|join(', ') }}" placeholder="GME, BBBY">
+                </label>
+
+                <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <span>Auto-throttle om budgeten blir hög</span>
+                        <div class="ai-popup" role="dialog" aria-label="Info om auto-throttle">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Auto-throttle</strong><br><br>
+                                När den är på bromsar systemet automatiskt bakgrundsscannen när budgetläget blir
+                                högt.<br><br>
+                                Det betyder att intervallet faktiskt blir längre, så du får mindre API-tryck utan att
+                                behöva ändra profilen manuellt.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="checkbox" name="ai_background_auto_throttle" {% if
+                        ai_background_settings.ai_background_auto_throttle %}checked{% endif %}>
+                </label>
+
+                <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(251, 191, 36, 0.18); border:1px solid rgba(251, 191, 36, 0.36);">i</button>
+                        <span>Safe mode för learning promotion</span>
+                        <div class="ai-popup" role="dialog" aria-label="Info om safe mode">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Safe mode</strong><br><br>
+                                När den är på får lärningen bara påverka live-läget när det finns tillräckligt med
+                                data och tillräcklig win-rate.<br><br>
+                                Annars kör systemet kvar på en stabil baseline tills underlaget blir bättre.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="checkbox" name="ai_learning_safe_mode" {% if
+                        ai_background_settings.ai_learning_safe_mode %}checked{% endif %}>
+                </label>
+
+                <label>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Minsta outcomes för promotion (rekommenderat 60):</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(251, 191, 36, 0.18); border:1px solid rgba(251, 191, 36, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om minsta outcomes">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Minsta outcomes</strong><br><br>
+                                Bestämmer hur många utvärderade utfall som krävs innan ny self-correction får slå
+                                igenom i live-läget.<br><br>
+                                Högre värde = mer konservativ drift.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="number" min="10" max="5000" step="1" name="ai_learning_promotion_min_samples"
+                        value="{{ ai_background_settings.ai_learning_promotion_min_samples }}">
+                </label>
+
+                <label>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                        <span>Minsta win-rate för promotion (%), rekommenderat 58.0:</span>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(251, 191, 36, 0.18); border:1px solid rgba(251, 191, 36, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om win-rate threshold">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Win-rate threshold</strong><br><br>
+                                Den lägsta win-rate som krävs innan lärningen får promotoras till live-läget.<br><br>
+                                Om den inte nås stannar systemet kvar i baseline-läge.
+                            </div>
+                        </div>
+                    </div>
+                    <input type="number" min="0" max="100" step="0.1" name="ai_learning_promotion_min_win_rate"
+                        value="{{ ai_background_settings.ai_learning_promotion_min_win_rate }}">
                 </label>
 
                 <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
@@ -2667,12 +3092,156 @@
                         ai_background_settings.ai_background_force_refresh %}checked{% endif %}>
                 </label>
 
-                <div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button type="submit" name="admin_save_ai_background" value="1">Spara AI-bakgrundsscan</button>
+                    <button type="submit" name="admin_run_ai_now" value="1"
+                        style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.34);">
+                        Kör AI nu
+                    </button>
                 </div>
             </form>
         </div>
     </div>
+
+    {% if is_admin %}
+    <div id="8d_reports-tab" style="display:none;">
+
+        <h2><svg class="ui-icon" style="color:#f472b6;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-target"></use>
+            </svg>8D-rapporter</h2>
+
+        <div class="box" style="margin-top:16px;">
+            <p style="margin:0 0 10px; color: var(--muted);">
+                Här samlas interna 8D-rapporter som AI skapar själv från redan loggade outcomes.
+                Rapport-ID följer formatet <b>år-månad-001</b>, <b>år-månad-002</b> osv och nollställs varje ny månad.
+                Varje rad länkar till en ren <b>txt-fil</b> som är enkel att läsa och ladda ned.
+            </p>
+
+            <div class="asset-box" style="margin:4px 0 14px; border-color: rgba(244, 114, 182, 0.30);">
+                <div
+                    style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                    <b>8D-arkiv</b>
+                    <button type="button" onclick="togglePopup(this)"
+                        style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(244, 114, 182, 0.2); border:1px solid rgba(244, 114, 182, 0.36);">i</button>
+                    <div class="ai-popup" role="dialog" aria-label="Info om 8D-rapporter">
+                        <button type="button" onclick="closePopup(this)">Stäng</button>
+                        <div>
+                            <strong>8D-rapporter</strong><br><br>
+                            Tabellen visar historiska internrapporter som AI själv har skapat när den utvärderat sina
+                            avvikelser.<br><br>
+                            ID:t är månatligt sekvensnummer, så den första rapporten i en ny månad blir alltid
+                            <b>YYYY-MM-001</b>.<br><br>
+                            Länken öppnar en enkel <b>txt-fil</b> med samma rapportinnehåll.
+                        </div>
+                    </div>
+                </div>
+
+                {% if eight_d_reports %}
+                <div style="overflow:auto;">
+                    <table class="table" style="min-width:980px; width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left; padding:8px;">Rapport-ID</th>
+                                <th style="text-align:left; padding:8px;">Skapad</th>
+                                <th style="text-align:right; padding:8px;">Sample</th>
+                                <th style="text-align:right; padding:8px;">Failure rate</th>
+                                <th style="text-align:right; padding:8px;">Avg move</th>
+                                <th style="text-align:left; padding:8px;">Problem</th>
+                                <th style="text-align:left; padding:8px;">TXT</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for report in eight_d_reports %}
+                            <tr>
+                                <td style="padding:8px; white-space:nowrap;"><b>{{ report.report_id }}</b></td>
+                                <td style="padding:8px; white-space:nowrap;">{{ report.created_at_txt }}</td>
+                                <td style="padding:8px; text-align:right;">{{ report.sample_size }}</td>
+                                <td style="padding:8px; text-align:right;">{{ report.failure_rate_pct }}%</td>
+                                <td style="padding:8px; text-align:right;">{{ report.avg_success_move_pct }}%</td>
+                                <td style="padding:8px;">{{ report.problem_statement }}</td>
+                                <td style="padding:8px; white-space:nowrap;">
+                                    {% if report.txt_exists %}
+                                    <a href="{{ report.txt_link }}" target="_blank" rel="noopener">Öppna txt</a>
+                                    {% else %}
+                                    Saknas
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="selection-note">Inga 8D-rapporter finns ännu. Nästa scan som skapar en avvikelse-rapport
+                    fyller tabellen automatiskt.</div>
+                {% endif %}
+            </div>
+
+            <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(244, 114, 182, 0.24);">
+                <div
+                    style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                    <b>Senaste 8D-rapport</b>
+                    <button type="button" onclick="togglePopup(this)"
+                        style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(244, 114, 182, 0.2); border:1px solid rgba(244, 114, 182, 0.36);">i</button>
+                    <div class="ai-popup" role="dialog" aria-label="Info om senaste 8D rapport">
+                        <button type="button" onclick="closePopup(this)">Stäng</button>
+                        <div>
+                            <strong>Senaste 8D-rapport</strong><br><br>
+                            Den senaste rapporten sammanfattar rotorsak, Fishbone, 5-Why, 5W2H och de automatiska
+                            självkorrektionsfaktorerna som AI använder i nästa körning.
+                        </div>
+                    </div>
+                </div>
+                <span style="color: var(--muted); font-size:0.9rem;">
+                    {% if learning_diagnostic_report.has_data %}
+                    <b>{{ learning_diagnostic_report.summary }}</b><br>
+                    Problem: {{ learning_diagnostic_report.problem_statement }}<br>
+                    Failure rate: <b>{{ learning_diagnostic_report.failure_rate_pct }}%</b> | Avg success move: <b>{{
+                        learning_diagnostic_report.avg_success_move_pct }}%</b><br>
+                    Self-correction: news <b>{{ learning_diagnostic_report.self_correction.news_mult }}</b>, rotation
+                    <b>{{ learning_diagnostic_report.self_correction.rotation_mult }}</b>, volatility <b>{{
+                        learning_diagnostic_report.self_correction.volatility_penalty_mult }}</b><br>
+                    {% else %}
+                    {{ learning_diagnostic_report.summary }}
+                    {% endif %}
+                </span>
+            </div>
+
+            <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(125, 211, 252, 0.28);">
+                <div
+                    style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                    <b>Syfte & Mål</b>
+                    <button type="button" onclick="togglePopup(this)"
+                        style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.2); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                    <div class="ai-popup" role="dialog" aria-label="Info om syfte och mål">
+                        <button type="button" onclick="closePopup(this)">Stäng</button>
+                        <div>
+                            <strong>Syfte & Mål</strong><br><br>
+                            Detta visar varför AI lägger tid på 8D: den ska själv förstå sina avvikelser, lära sig av
+                            dem och bli bättre i nästa scan.<br><br>
+                            Målet är att minska upprepade fel, förbättra träffsäkerheten per profil och låta varje ny
+                            rapport ge en konkret självkorrektion.
+                        </div>
+                    </div>
+                </div>
+                {% if learning_diagnostic_report.has_data %}
+                <span style="color: var(--muted); font-size:0.9rem;">
+                    <b>{{ learning_diagnostic_report.purpose }}</b><br>
+                    <b>Vision:</b> {{ learning_diagnostic_report.vision }}<br>
+                    Mål:<br>
+                    {% for goal in learning_diagnostic_report.goals %}
+                    <div style="margin-left:12px;">- {{ goal }}</div>
+                    {% endfor %}
+                </span>
+                {% else %}
+                <span style="color: var(--muted); font-size:0.9rem;">
+                    {{ learning_diagnostic_report.summary }}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <div id="users-tab" style="display:none;">
 

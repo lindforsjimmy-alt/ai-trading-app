@@ -127,6 +127,8 @@ AI_BACKGROUND_SCAN_FORCE_REFRESH = _env_bool(
 AI_BACKGROUND_DEFAULT_STRATEGY = (os.environ.get("AI_BACKGROUND_DEFAULT_STRATEGY") or "short").strip().lower()
 AI_BACKGROUND_DEFAULT_RISK = (os.environ.get("AI_BACKGROUND_DEFAULT_RISK") or "medium").strip().lower()
 AI_BACKGROUND_DEFAULT_CAPITAL = _env_int("AI_BACKGROUND_DEFAULT_CAPITAL", 5000 if FREE_API_MODE else 10000)
+AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT = _env_int("AI_LEARNING_PROMOTION_MIN_SAMPLES", 60)
+AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT = float(os.environ.get("AI_LEARNING_PROMOTION_MIN_WIN_RATE", "58.0"))
 
 HYBRID_SCAN_CORE_SIZE = _env_int("HYBRID_SCAN_CORE_SIZE", 90 if FREE_API_MODE else 130)
 HYBRID_SCAN_ROTATION_WINDOW = _env_int("HYBRID_SCAN_ROTATION_WINDOW", 90 if FREE_API_MODE else 130)
@@ -318,6 +320,7 @@ APP_SETTINGS_FILE = "stock_data/app_settings.json"
 AI_PENDING_OUTCOMES_FILE = "stock_data/ai_pending_outcomes.jsonl"
 AI_OUTCOMES_LOG_FILE = "stock_data/ai_outcomes_log.jsonl"
 AI_SCAN_TRACE_FILE = "stock_data/ai_scan_trace.jsonl"
+AI_8D_REPORTS_INDEX_FILE = "stock_data/ai_8d_reports.jsonl"
 SOLD_TRADES_FILE = "stock_data/sold_trades.txt"
 GLOBAL_TICKERS_FILE = "stock_data/global_tickers.txt"
 OMX_TICKERS_FILE = "stock_data/omx_tickers.csv"
@@ -736,6 +739,37 @@ def _truthy_text(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _parse_csv_symbol_list(raw_value):
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, (list, tuple, set)):
+        values = raw_value
+    else:
+        values = str(raw_value).replace(";", ",").split(",")
+
+    symbols = []
+    seen = set()
+    for value in values:
+        symbol = str(value or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+    return symbols
+
+
+def update_ai_runtime_status(**updates):
+    if not updates:
+        return
+    with AI_RUNTIME_STATUS_LOCK:
+        AI_RUNTIME_STATUS.update(updates)
+
+
+def get_ai_runtime_status():
+    with AI_RUNTIME_STATUS_LOCK:
+        return dict(AI_RUNTIME_STATUS)
+
+
 def get_loss_blocked_tickers(email):
     target = (email or "").strip().lower()
     blocked = set()
@@ -856,8 +890,24 @@ if not os.path.exists(APP_SETTINGS_FILE):
 open(AI_PENDING_OUTCOMES_FILE, "a", encoding="utf-8").close()
 open(AI_OUTCOMES_LOG_FILE, "a", encoding="utf-8").close()
 open(AI_SCAN_TRACE_FILE, "a", encoding="utf-8").close()
+open(AI_8D_REPORTS_INDEX_FILE, "a", encoding="utf-8").close()
+os.makedirs(os.path.join("reports", "8d"), exist_ok=True)
 
 NOVELTY_MISS_COUNTER = {}
+AI_SELF_CORRECTION_LOCK = threading.Lock()
+AI_SELF_CORRECTION_STATE = {
+    "updated_at": 0.0,
+    "profile_key": "all",
+    "news_mult": 1.0,
+    "rotation_mult": 1.0,
+    "volatility_penalty_mult": 1.0,
+    "stability_bonus_mult": 1.0,
+    "diversification_pressure": 1.0,
+    "strategy_bias": {},
+    "risk_bias": {},
+    "horizon_bias": {},
+    "type_bias": {},
+}
 
 
 def _normalize_background_scheduler_settings(raw_data):
@@ -891,6 +941,33 @@ def _normalize_background_scheduler_settings(raw_data):
         capital = AI_BACKGROUND_DEFAULT_CAPITAL
     capital = max(100, min(10_000_000, capital))
 
+    auto_throttle_raw = data.get("ai_background_auto_throttle", True)
+    if isinstance(auto_throttle_raw, bool):
+        auto_throttle = auto_throttle_raw
+    else:
+        auto_throttle = str(auto_throttle_raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    safe_mode_raw = data.get("ai_learning_safe_mode", True)
+    if isinstance(safe_mode_raw, bool):
+        safe_mode = safe_mode_raw
+    else:
+        safe_mode = str(safe_mode_raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    try:
+        promotion_min_samples = int(data.get("ai_learning_promotion_min_samples", AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT))
+    except Exception:
+        promotion_min_samples = AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT
+    promotion_min_samples = max(10, min(5000, promotion_min_samples))
+
+    try:
+        promotion_min_win_rate = float(data.get("ai_learning_promotion_min_win_rate", AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT))
+    except Exception:
+        promotion_min_win_rate = AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT
+    promotion_min_win_rate = max(0.0, min(100.0, promotion_min_win_rate))
+
+    whitelist = _parse_csv_symbol_list(data.get("ai_background_whitelist", []))
+    blacklist = _parse_csv_symbol_list(data.get("ai_background_blacklist", []))
+
     horizons_raw = data.get("outcome_horizons", OUTCOME_HORIZONS)
     if isinstance(horizons_raw, (list, tuple)):
         horizons_txt = ",".join(str(x) for x in horizons_raw)
@@ -919,6 +996,12 @@ def _normalize_background_scheduler_settings(raw_data):
         "ai_background_strategy": strategy,
         "ai_background_risk": risk,
         "ai_background_capital": capital,
+        "ai_background_auto_throttle": auto_throttle,
+        "ai_learning_safe_mode": safe_mode,
+        "ai_learning_promotion_min_samples": promotion_min_samples,
+        "ai_learning_promotion_min_win_rate": promotion_min_win_rate,
+        "ai_background_whitelist": whitelist,
+        "ai_background_blacklist": blacklist,
         "outcome_horizons": outcome_horizons,
         "outcome_success_move_pct": success_move_pct,
         "outcome_preset_key": outcome_preset_key,
@@ -965,6 +1048,12 @@ def build_free_api_scheduler_profile():
         "ai_background_strategy": "short",
         "ai_background_risk": "medium",
         "ai_background_capital": 5000,
+        "ai_background_auto_throttle": True,
+        "ai_learning_safe_mode": True,
+        "ai_learning_promotion_min_samples": AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT,
+        "ai_learning_promotion_min_win_rate": AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT,
+        "ai_background_whitelist": [],
+        "ai_background_blacklist": [],
     }
 
 
@@ -1074,6 +1163,92 @@ def build_api_budget_health(settings):
         "recommended_interval_seconds": recommended_interval_seconds,
         "recommendation_text": recommendation_text,
         "free_api_mode": FREE_API_MODE,
+    }
+
+
+def build_learning_guardrails(settings=None, learning_status=None, budget_health=None):
+    cfg = settings if isinstance(settings, dict) else load_app_settings()
+    learning = learning_status if isinstance(learning_status, dict) else build_learning_status()
+    budget = budget_health if isinstance(budget_health, dict) else build_api_budget_health(cfg)
+
+    safe_mode = coerce_bool_setting(cfg.get("ai_learning_safe_mode", True), True)
+
+    try:
+        min_samples = int(cfg.get("ai_learning_promotion_min_samples", AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT))
+    except Exception:
+        min_samples = AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT
+    min_samples = max(10, min(5000, min_samples))
+
+    try:
+        min_win_rate = float(cfg.get("ai_learning_promotion_min_win_rate", AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT))
+    except Exception:
+        min_win_rate = AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT
+    min_win_rate = max(0.0, min(100.0, min_win_rate))
+
+    sample_size = int(learning.get("total_outcomes") or learning.get("sample_size") or 0)
+    win_rate = float(learning.get("success_rate_pct") or 0.0)
+    budget_risk = str(budget.get("risk_level") or "low").strip().lower()
+
+    reasons = []
+    if safe_mode and sample_size < min_samples:
+        reasons.append(f"För få outcomes för promotion: {sample_size}/{min_samples}")
+    if safe_mode and win_rate < min_win_rate:
+        reasons.append(f"Win-rate under tröskel: {win_rate:.1f}%/{min_win_rate:.1f}%")
+    if budget_risk == "high":
+        reasons.append("API-budgeten är hög, så live-promotion hålls tillbaka")
+
+    promotion_allowed = (not safe_mode) or not reasons
+    promotion_reason = "Promotion tillåten" if promotion_allowed else "; ".join(reasons)
+
+    return {
+        "safe_mode_enabled": safe_mode,
+        "promotion_min_samples": min_samples,
+        "promotion_min_win_rate": round(min_win_rate, 1),
+        "sample_size": sample_size,
+        "win_rate_pct": round(win_rate, 1),
+        "budget_risk_level": budget_risk,
+        "promotion_allowed": promotion_allowed,
+        "promotion_blocked": not promotion_allowed,
+        "promotion_reason": promotion_reason,
+        "uses_baseline": safe_mode and not promotion_allowed,
+    }
+
+
+def get_effective_ai_refresh_interval(settings=None):
+    cfg = settings if isinstance(settings, dict) else load_app_settings()
+    interval_seconds = max(60, int(cfg.get("ai_background_interval_seconds") or AI_BACKGROUND_SCAN_INTERVAL_SECONDS))
+    budget_health = build_api_budget_health(cfg)
+    if cfg.get("ai_background_auto_throttle") and budget_health.get("risk_level") == "high":
+        interval_seconds = max(interval_seconds, int(budget_health.get("recommended_interval_seconds") or interval_seconds))
+    return max(60, min(86400, int(interval_seconds)))
+
+
+def build_ai_runtime_status():
+    state = get_ai_runtime_status()
+    next_run = int(state.get("next_run_at") or 0)
+    last_success = int(state.get("last_success_at") or 0)
+    last_failure = int(state.get("last_failure_at") or 0)
+    last_run = int(state.get("last_run_at") or 0)
+
+    def _fmt(ts):
+        return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC") if ts else "-"
+
+    return {
+        "last_success": _fmt(last_success),
+        "last_failure": _fmt(last_failure),
+        "last_run": _fmt(last_run),
+        "next_run": _fmt(next_run),
+        "last_duration_sec": round(float(state.get("last_duration_sec") or 0.0), 1),
+        "last_error": state.get("last_error") or "-",
+        "last_run_count": int(state.get("last_run_count") or 0),
+        "last_run_mode": state.get("last_run_mode") or "-",
+        "last_run_strategy": state.get("last_run_strategy") or "-",
+        "last_run_risk": state.get("last_run_risk") or "-",
+        "last_run_throttled": bool(state.get("last_run_throttled")),
+        "last_learning_safe_mode": bool(state.get("last_learning_safe_mode")),
+        "last_promotion_allowed": bool(state.get("last_promotion_allowed")),
+        "last_promotion_blocked": bool(state.get("last_promotion_blocked")),
+        "last_promotion_reason": state.get("last_promotion_reason") or "-",
     }
 
 
@@ -1222,6 +1397,272 @@ def _rewrite_jsonl_rows(file_path, rows):
         logger.warning("JSONL rewrite failed for %s: %s", file_path, ex)
 
 
+def _report_8d_dir():
+    path = os.path.join("reports", "8d")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _month_key_from_ts(ts=None):
+    moment = datetime.utcfromtimestamp(float(ts or time.time()))
+    return moment.strftime("%Y-%m")
+
+
+def _load_8d_report_index():
+    rows = _read_jsonl_tail(AI_8D_REPORTS_INDEX_FILE, max_rows=5000)
+    rows = [row for row in rows if isinstance(row, dict) and row.get("report_id")]
+    rows.sort(key=lambda row: (row.get("created_at") or 0, row.get("report_id") or ""), reverse=True)
+    return rows
+
+
+def _build_8d_report_id(created_at=None):
+    month_key = _month_key_from_ts(created_at)
+    prefix = f"{month_key}-"
+    existing = []
+    for name in os.listdir(_report_8d_dir()):
+        if not name.lower().endswith(".txt"):
+            continue
+        if not name.startswith(prefix):
+            continue
+        match = re.search(r"-(\d{3})\.txt$", name)
+        if match:
+            try:
+                existing.append(int(match.group(1)))
+            except Exception:
+                continue
+    next_seq = (max(existing) + 1) if existing else 1
+    return f"{month_key}-{next_seq:03d}"
+
+
+def _group_outcome_rate(rows, key_name):
+    buckets = {}
+    for row in rows:
+        key = str(row.get(key_name) or "okänt").strip().lower()
+        bucket = buckets.setdefault(key, {"total": 0, "wins": 0, "move_sum": 0.0})
+        bucket["total"] += 1
+        if row.get("success"):
+            bucket["wins"] += 1
+        bucket["move_sum"] += float(row.get("move_pct") or 0)
+    scored = []
+    for key, bucket in buckets.items():
+        if bucket["total"] <= 0:
+            continue
+        win_rate = (bucket["wins"] / float(bucket["total"])) * 100.0
+        scored.append({
+            "label": key,
+            "total": bucket["total"],
+            "wins": bucket["wins"],
+            "win_rate_pct": round(win_rate, 1),
+            "avg_move_pct": round(bucket["move_sum"] / float(bucket["total"]), 2),
+        })
+    scored.sort(key=lambda x: (x["win_rate_pct"], x["total"]), reverse=True)
+    return scored
+
+
+def build_learning_self_correction(rows=None):
+    rows = rows if isinstance(rows, list) else _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+    if not rows:
+        return {
+            "has_data": False,
+            "profile_key": "all",
+            "news_mult": 1.0,
+            "rotation_mult": 1.0,
+            "volatility_penalty_mult": 1.0,
+            "stability_bonus_mult": 1.0,
+            "diversification_pressure": 1.0,
+            "strategy_bias": {},
+            "risk_bias": {},
+            "horizon_bias": {},
+            "type_bias": {},
+        }
+
+    total = len(rows)
+    overall_win_rate = sum(1 for row in rows if row.get("success")) / float(total)
+
+    strategy_rates = _group_outcome_rate(rows, "strategy_profile")
+    risk_rates = _group_outcome_rate(rows, "risk_profile")
+    horizon_rates = _group_outcome_rate(rows, "horizon_hours")
+    type_rates = _group_outcome_rate(rows, "asset_type")
+
+    def _bias_map(scored_rows, default_floor=0.8, default_ceiling=1.2):
+        out = {}
+        for row in scored_rows:
+            delta = (row["win_rate_pct"] / 100.0) - overall_win_rate
+            factor = max(default_floor, min(default_ceiling, 1.0 + (delta * 1.5)))
+            out[row["label"]] = round(factor, 3)
+        return out
+
+    strategy_bias = _bias_map(strategy_rates, 0.75, 1.15)
+    risk_bias = _bias_map(risk_rates, 0.8, 1.12)
+    horizon_bias = _bias_map(horizon_rates, 0.8, 1.12)
+    type_bias = _bias_map(type_rates, 0.75, 1.15)
+
+    def _lowest_factor(scored_rows):
+        if not scored_rows:
+            return 1.0
+        weakest = scored_rows[-1]
+        delta = (weakest["win_rate_pct"] / 100.0) - overall_win_rate
+        return max(0.75, min(1.2, 1.0 + (delta * 1.8)))
+
+    news_mult = _lowest_factor(horizon_rates)
+    rotation_mult = _lowest_factor(strategy_rates)
+    volatility_penalty_mult = max(0.85, min(1.35, 1.0 + ((1.0 - overall_win_rate) * 0.3)))
+    stability_bonus_mult = max(0.85, min(1.3, 1.0 + (overall_win_rate * 0.2)))
+    diversification_pressure = max(0.9, min(1.4, 1.0 + ((1.0 - overall_win_rate) * 0.4)))
+
+    return {
+        "has_data": True,
+        "profile_key": "all",
+        "news_mult": round(news_mult, 3),
+        "rotation_mult": round(rotation_mult, 3),
+        "volatility_penalty_mult": round(volatility_penalty_mult, 3),
+        "stability_bonus_mult": round(stability_bonus_mult, 3),
+        "diversification_pressure": round(diversification_pressure, 3),
+        "strategy_bias": strategy_bias,
+        "risk_bias": risk_bias,
+        "horizon_bias": horizon_bias,
+        "type_bias": type_bias,
+    }
+
+
+def update_learning_self_correction_state(report=None):
+    if not isinstance(report, dict):
+        return get_learning_self_correction_state()
+
+    self_correction = report.get("self_correction") or {}
+    with AI_SELF_CORRECTION_LOCK:
+        AI_SELF_CORRECTION_STATE.update({
+            "updated_at": float(report.get("created_at") or time.time()),
+            "profile_key": str(self_correction.get("profile_key") or "all"),
+            "news_mult": float(self_correction.get("news_mult", 1.0)),
+            "rotation_mult": float(self_correction.get("rotation_mult", 1.0)),
+            "volatility_penalty_mult": float(self_correction.get("volatility_penalty_mult", 1.0)),
+            "stability_bonus_mult": float(self_correction.get("stability_bonus_mult", 1.0)),
+            "diversification_pressure": float(self_correction.get("diversification_pressure", 1.0)),
+            "strategy_bias": dict(self_correction.get("strategy_bias") or {}),
+            "risk_bias": dict(self_correction.get("risk_bias") or {}),
+            "horizon_bias": dict(self_correction.get("horizon_bias") or {}),
+            "type_bias": dict(self_correction.get("type_bias") or {}),
+        })
+        return dict(AI_SELF_CORRECTION_STATE)
+
+
+def get_learning_self_correction_state():
+    with AI_SELF_CORRECTION_LOCK:
+        return dict(AI_SELF_CORRECTION_STATE)
+
+
+def _build_8d_report_text(report):
+    created_at = report.get("created_at_txt") or "-"
+    lines = [
+        f"8D-Report ID: {report.get('report_id') or '-'}",
+        f"Created: {created_at}",
+        f"Sample size: {report.get('sample_size', 0)}",
+        f"Failure rate: {report.get('failure_rate_pct', 0)}%",
+        f"Avg success move: {report.get('avg_success_move_pct', 0)}%",
+        "",
+        f"Purpose: {report.get('purpose') or '-'}",
+        f"Vision: {report.get('vision') or '-'}",
+        "",
+        "Goals:",
+    ]
+    for item in report.get("goals") or []:
+        lines.append(f"- {item}")
+    lines.extend([
+        "",
+        f"Problem: {report.get('problem_statement') or '-'}",
+        "",
+        "Containment:",
+    ])
+    for item in report.get("containment") or []:
+        lines.append(f"- {item}")
+    lines.extend(["", "5-Why:"])
+    for item in report.get("five_why") or []:
+        lines.append(f"- {item}")
+    lines.extend(["", "Fishbone:"])
+    for branch in report.get("fishbone") or []:
+        lines.append(f"- {branch.get('category')}: {', '.join(branch.get('items') or [])}")
+    lines.extend(["", "5W2H:"])
+    for row in report.get("five_w_two_h") or []:
+        lines.append(f"- {row.get('label')}: {row.get('value')}")
+    lines.extend(["", "Corrective actions:"])
+    for item in report.get("corrective_actions") or []:
+        lines.append(f"- {item}")
+    lines.extend(["", "Verification:"])
+    for item in report.get("verification") or []:
+        lines.append(f"- {item}")
+    lines.extend(["", "Self-correction:"])
+    self_corr = report.get("self_correction") or {}
+    lines.append(f"- news_mult: {self_corr.get('news_mult', 1.0)}")
+    lines.append(f"- rotation_mult: {self_corr.get('rotation_mult', 1.0)}")
+    lines.append(f"- volatility_penalty_mult: {self_corr.get('volatility_penalty_mult', 1.0)}")
+    lines.append(f"- stability_bonus_mult: {self_corr.get('stability_bonus_mult', 1.0)}")
+    lines.append(f"- diversification_pressure: {self_corr.get('diversification_pressure', 1.0)}")
+    return "\n".join(lines).strip() + "\n"
+
+
+def persist_learning_8d_report(report):
+    if not isinstance(report, dict) or not report.get("has_data"):
+        return None
+
+    created_at = float(report.get("created_at") or time.time())
+    report_id = _build_8d_report_id(created_at)
+    created_at_txt = datetime.utcfromtimestamp(created_at).strftime("%Y-%m-%d %H:%M UTC")
+    report = dict(report)
+    report["report_id"] = report_id
+    report["created_at"] = created_at
+    report["created_at_txt"] = created_at_txt
+
+    txt_path = os.path.join(_report_8d_dir(), f"{report_id}.txt")
+    try:
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(_build_8d_report_text(report))
+    except Exception as ex:
+        logger.warning("Failed to persist 8D report txt %s: %s", txt_path, ex)
+        return None
+
+    index_row = {
+        "report_id": report_id,
+        "created_at": created_at,
+        "created_at_txt": created_at_txt,
+        "sample_size": int(report.get("sample_size") or 0),
+        "failure_rate_pct": float(report.get("failure_rate_pct") or 0),
+        "avg_success_move_pct": float(report.get("avg_success_move_pct") or 0),
+        "purpose": report.get("purpose") or "",
+        "vision": report.get("vision") or "",
+        "problem_statement": report.get("problem_statement") or "",
+        "txt_file": txt_path,
+        "summary": report.get("summary") or "",
+    }
+    _append_jsonl(AI_8D_REPORTS_INDEX_FILE, index_row)
+    return report
+
+
+def build_8d_report_archive():
+    rows = _load_8d_report_index()
+    archive = []
+    for row in rows:
+        txt_file = row.get("txt_file") or ""
+        report_id = row.get("report_id") or ""
+        exists = bool(txt_file and os.path.exists(txt_file))
+        archive.append({
+            "report_id": report_id,
+            "created_at_txt": row.get("created_at_txt") or "-",
+            "sample_size": int(row.get("sample_size") or 0),
+            "failure_rate_pct": round(float(row.get("failure_rate_pct") or 0), 1),
+            "avg_success_move_pct": round(float(row.get("avg_success_move_pct") or 0), 2),
+            "purpose": row.get("purpose") or "",
+            "vision": row.get("vision") or "",
+            "problem_statement": row.get("problem_statement") or "",
+            "txt_file": txt_file,
+            "txt_exists": exists,
+            "txt_link": f"/reports/8d/{os.path.basename(txt_file)}" if exists else "",
+            "summary": row.get("summary") or "",
+        })
+    return archive
+
+
 def _rotation_window(symbols, window_size, cycle_index):
     if not symbols:
         return []
@@ -1316,6 +1757,44 @@ def build_hybrid_scan_plan(pool_symbols, previous_ranked=None):
     }
 
 
+def filter_scan_universe(symbols, whitelist=None, blacklist=None):
+    allowed = set(_parse_csv_symbol_list(whitelist))
+    blocked = set(_parse_csv_symbol_list(blacklist))
+    out = []
+    seen = set()
+    for sym in symbols or []:
+        key = (sym or "").strip().upper()
+        if not key or key in seen:
+            continue
+        if allowed and key not in allowed:
+            continue
+        if key in blocked:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def estimate_price_volatility_pct(prices):
+    if not prices or len(prices) < 5:
+        return 0.0
+    cleaned = []
+    prev = None
+    for price in prices:
+        try:
+            current = float(price)
+        except Exception:
+            continue
+        if current <= 0:
+            continue
+        if prev and prev > 0:
+            cleaned.append(abs((current - prev) / prev) * 100.0)
+        prev = current
+    if not cleaned:
+        return 0.0
+    return sum(cleaned) / float(len(cleaned))
+
+
 def evaluate_pending_outcomes():
     now = time.time()
     outcome_cfg = get_runtime_outcome_config()
@@ -1370,40 +1849,82 @@ def evaluate_pending_outcomes():
         _rewrite_jsonl_rows(AI_PENDING_OUTCOMES_FILE, keep)
 
 
-def compute_learning_multipliers():
+def compute_learning_multipliers(current_meta=None):
     rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
     rows = [r for r in rows if isinstance(r.get("success"), bool)]
-    if len(rows) < LEARNING_MIN_OUTCOMES:
+
+    meta = current_meta if isinstance(current_meta, dict) else {}
+    current_strategy = str(meta.get("strategy") or "").strip().lower()
+    current_risk = str(meta.get("risk") or "").strip().lower()
+    now = time.time()
+    decay_half_life_days = 30.0
+    decay_lambda = math.log(2.0) / (decay_half_life_days * 86400.0)
+
+    weighted = []
+    for row in rows:
+        resolved_at = int(row.get("resolved_at") or 0)
+        age = max(0.0, now - float(resolved_at or now))
+        weight = math.exp(-decay_lambda * age) if resolved_at else 0.2
+        weighted.append((row, max(0.1, min(1.0, weight))))
+
+    if len(weighted) < LEARNING_MIN_OUTCOMES:
         return {
             "news_mult": 1.0,
             "rotation_mult": 1.0,
             "sample_size": len(rows),
+            "profile_key": f"{current_strategy}:{current_risk}" if (current_strategy or current_risk) else "all",
         }
 
-    overall = sum(1 for r in rows if r.get("success")) / float(len(rows))
+    def _weighted_rate(items, predicate=None):
+        total_w = 0.0
+        win_w = 0.0
+        for row, weight in items:
+            if predicate is not None and not predicate(row):
+                continue
+            total_w += weight
+            if row.get("success"):
+                win_w += weight
+        return (win_w / total_w) if total_w > 0 else None
 
-    news_rows = [r for r in rows if r.get("news_trigger") is True]
-    rotation_rows = [r for r in rows if r.get("rotation_candidate") is True]
+    profile_items = weighted
+    if current_strategy:
+        strategy_items = [(r, w) for r, w in weighted if str(r.get("strategy_profile") or "").strip().lower() in {"", "okänt", current_strategy}]
+        if len(strategy_items) >= max(10, LEARNING_MIN_OUTCOMES // 3):
+            profile_items = strategy_items
+    if current_risk:
+        risk_items = [(r, w) for r, w in profile_items if str(r.get("risk_profile") or "").strip().lower() in {"", "okänt", current_risk}]
+        if len(risk_items) >= max(8, LEARNING_MIN_OUTCOMES // 4):
+            profile_items = risk_items
+
+    overall = _weighted_rate(profile_items) or 0.5
+    news_rate = _weighted_rate([x for x in profile_items if x[0].get("news_trigger") is True])
+    rot_rate = _weighted_rate([x for x in profile_items if x[0].get("rotation_candidate") is True])
+    self_corr = get_learning_self_correction_state()
 
     news_mult = 1.0
     rotation_mult = 1.0
 
-    if len(news_rows) >= max(10, LEARNING_MIN_OUTCOMES // 3):
-        news_rate = sum(1 for r in news_rows if r.get("success")) / float(len(news_rows))
+    if news_rate is not None:
         news_mult = max(0.7, min(1.4, 1.0 + ((news_rate - overall) * 1.2)))
 
-    if len(rotation_rows) >= max(10, LEARNING_MIN_OUTCOMES // 3):
-        rot_rate = sum(1 for r in rotation_rows if r.get("success")) / float(len(rotation_rows))
+    if rot_rate is not None:
         rotation_mult = max(0.75, min(1.35, 1.0 + ((rot_rate - overall) * 1.0)))
+
+    news_mult *= float(self_corr.get("news_mult") or 1.0)
+    rotation_mult *= float(self_corr.get("rotation_mult") or 1.0)
 
     return {
         "news_mult": round(news_mult, 3),
         "rotation_mult": round(rotation_mult, 3),
         "sample_size": len(rows),
+        "profile_key": f"{current_strategy}:{current_risk}" if (current_strategy or current_risk) else "all",
+        "volatility_penalty_mult": float(self_corr.get("volatility_penalty_mult") or 1.0),
+        "stability_bonus_mult": float(self_corr.get("stability_bonus_mult") or 1.0),
+        "diversification_pressure": float(self_corr.get("diversification_pressure") or 1.0),
     }
 
 
-def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at):
+def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at, scan_meta=None):
     if not result_rows:
         return
 
@@ -1421,6 +1942,7 @@ def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at):
     core_set = scan_plan.get("core_symbols", set())
     rotation_set = scan_plan.get("rotation_symbols", set())
     news_set = scan_plan.get("news_trigger_symbols", set())
+    meta = scan_meta if isinstance(scan_meta, dict) else {}
 
     for row in result_rows[:OUTCOME_TRACK_TOP_N]:
         sym = (row.get("t") or "").strip().upper()
@@ -1441,6 +1963,10 @@ def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at):
                 "signal": signal,
                 "news_trigger": sym in news_set,
                 "rotation_candidate": sym in rotation_set and sym not in core_set,
+                "strategy_profile": str(meta.get("strategy") or "okänt").strip().lower(),
+                "risk_profile": str(meta.get("risk") or "okänt").strip().lower(),
+                "asset_type": str(row.get("type") or "stock").strip().lower(),
+                "symbol_cluster": str(row.get("type") or "stock").strip().lower(),
             }
 
     _rewrite_jsonl_rows(AI_PENDING_OUTCOMES_FILE, list(pending_map.values()))
@@ -1549,8 +2075,208 @@ def build_learning_progress_indicator():
     }
 
 
-def log_scan_trace(scan_started_at, scan_plan, learning_multipliers, result_rows):
+def build_quality_overview():
+    rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+    if not rows:
+        return {
+            "has_data": False,
+            "summary": "Ingen tillräcklig outcome-historik ännu.",
+            "top_by_strategy": [],
+            "top_by_risk": [],
+            "top_by_horizon": [],
+            "top_by_type": [],
+        }
+
+    def _group_score(items, key_name):
+        buckets = {}
+        for row in items:
+            key = str(row.get(key_name) or "okänt").strip().lower()
+            bucket = buckets.setdefault(key, {"total": 0, "wins": 0, "move_sum": 0.0})
+            bucket["total"] += 1
+            if row.get("success"):
+                bucket["wins"] += 1
+            bucket["move_sum"] += float(row.get("move_pct") or 0)
+        out = []
+        for key, bucket in buckets.items():
+            if bucket["total"] <= 0:
+                continue
+            win_pct = (bucket["wins"] / float(bucket["total"])) * 100.0
+            out.append({
+                "label": key,
+                "total": bucket["total"],
+                "win_rate_pct": round(win_pct, 1),
+                "avg_move_pct": round(bucket["move_sum"] / float(bucket["total"]), 2),
+            })
+        out.sort(key=lambda x: (x["win_rate_pct"], x["total"]), reverse=True)
+        return out[:5]
+
+    return {
+        "has_data": True,
+        "summary": f"{len(rows)} utvärderade outcomes.",
+        "top_by_strategy": _group_score(rows, "strategy_profile"),
+        "top_by_risk": _group_score(rows, "risk_profile"),
+        "top_by_horizon": _group_score(rows, "horizon_hours"),
+        "top_by_type": _group_score(rows, "asset_type"),
+    }
+
+
+def build_learning_diagnostic_report():
+    rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+    multipliers = compute_learning_multipliers()
+    self_correction = build_learning_self_correction(rows)
+
+    if not rows:
+        return {
+            "has_data": False,
+            "summary": "Ingen tillräcklig outcome-historik för 8D/rotorsaksanalys ännu.",
+            "sample_size": 0,
+            "problem_statement": "Saknar data för att analysera avvikelser.",
+            "containment": [],
+            "five_why": [],
+            "fishbone": [],
+            "five_w_two_h": [],
+            "corrective_actions": [],
+            "verification": [],
+            "self_correction": self_correction,
+        }
+
+    total = len(rows)
+    success_count = sum(1 for row in rows if row.get("success"))
+    failure_count = total - success_count
+    failure_rate = (failure_count / float(total)) * 100.0 if total else 0.0
+    avg_success_move = 0.0
+    success_rows = [row for row in rows if row.get("success")]
+    if success_rows:
+        avg_success_move = sum(float(row.get("move_pct") or 0) for row in success_rows) / float(len(success_rows))
+
+    purpose = (
+        "Syftet med 8D är att AI själv ska hitta rotorsaker till avvikelser, "
+        "förstå vad som fungerade och justera nästa scan utan manuell styrning."
+    )
+    goals = [
+        "Minska återkommande felmönster i rekommendationer.",
+        "Förbättra win-rate per strategi, risk och horisont.",
+        "Se till att varje ny rapport ger en konkret justering i nästa körning.",
+        "Bevara låg API-kostnad genom intern analys av redan loggade outcomes.",
+    ]
+    vision = (
+        "Visionen är att AI till slut endast ska hitta och leverera topp-score 81-100 utifrån "
+        "användarens val. Tills dess är det helt okej att hitta och leverera det som finns, "
+        "så länge varje körning används för att lära systemet att närma sig den nivån."
+    )
+
+    def _group_win_rate(items, key_name):
+        buckets = {}
+        for row in items:
+            key = str(row.get(key_name) or "okänt").strip().lower()
+            bucket = buckets.setdefault(key, {"total": 0, "wins": 0, "move_sum": 0.0})
+            bucket["total"] += 1
+            if row.get("success"):
+                bucket["wins"] += 1
+            bucket["move_sum"] += float(row.get("move_pct") or 0)
+        scored = []
+        for key, bucket in buckets.items():
+            if bucket["total"] <= 0:
+                continue
+            win_rate = (bucket["wins"] / float(bucket["total"])) * 100.0
+            scored.append({
+                "label": key,
+                "total": bucket["total"],
+                "win_rate_pct": round(win_rate, 1),
+                "avg_move_pct": round(bucket["move_sum"] / float(bucket["total"]), 2),
+            })
+        scored.sort(key=lambda x: (x["win_rate_pct"], x["total"]), reverse=True)
+        return scored
+
+    worst_strategy = _group_win_rate(rows, "strategy_profile")[-1] if _group_win_rate(rows, "strategy_profile") else None
+    worst_risk = _group_win_rate(rows, "risk_profile")[-1] if _group_win_rate(rows, "risk_profile") else None
+    worst_horizon = _group_win_rate(rows, "horizon_hours")[-1] if _group_win_rate(rows, "horizon_hours") else None
+    worst_type = _group_win_rate(rows, "asset_type")[-1] if _group_win_rate(rows, "asset_type") else None
+
+    dominant_failure_mode = "okänt"
+    if worst_strategy and worst_strategy["win_rate_pct"] < 50:
+        dominant_failure_mode = f"strategi {worst_strategy['label']}"
+    elif worst_risk and worst_risk["win_rate_pct"] < 50:
+        dominant_failure_mode = f"riskprofil {worst_risk['label']}"
+    elif worst_horizon and worst_horizon["win_rate_pct"] < 50:
+        dominant_failure_mode = f"horisont {worst_horizon['label']}h"
+    elif worst_type and worst_type["win_rate_pct"] < 50:
+        dominant_failure_mode = f"tillgångstyp {worst_type['label']}"
+
+    problem_statement = (
+        f"AI har {failure_rate:.1f}% avvikelser i loggade outcomes ({failure_count} av {total}). "
+        f"Läget pekar just nu mest mot {dominant_failure_mode}."
+    )
+
+    containment = [
+        f"Behåll auto-throttle aktivt när API-budgeten blir hög. Nuvarande learning-multiplier: news {multipliers.get('news_mult', 1.0)}, rotation {multipliers.get('rotation_mult', 1.0)}.",
+        "Fortsätt filtrera med whitelist/blacklist så lärandet inte blandar in irrelevanta symboler.",
+        f"Begränsa aggressivitet i lågriskprofiler om volatiliteten överstiger ungefär {max(4, min(10, int(round(abs(avg_success_move) + 4))))}%.",
+    ]
+
+    why1 = f"Varför blev utfallet sämre? För att den dominerande missgruppen just nu är {dominant_failure_mode}."
+    why2 = "Varför händer det? För att vikterna kan vara för aggressiva i just den profilen eller horisonten."
+    why3 = "Varför blir vikterna för aggressiva? För att signalerna bygger på historik som inte matchar senaste marknadsläget tillräckligt väl."
+    why4 = "Varför matchar de inte? För att volatilitet, news och rotation påverkar olika instrument olika mycket."
+    why5 = "Varför fångas inte det bättre? För att intern återkoppling fortfarande behöver mer data och tydligare profilseparering."
+
+    fishbone = [
+        {"category": "Metod", "items": ["För stark nyhetsvikt", "Rotation kan övervikta nya kandidater", "Låg sample size i vissa profiler"]},
+        {"category": "Data", "items": ["Ojämn outcome-volym per horisont", "Saknar stabilitet i vissa segments", "Övervikt på senaste data"]},
+        {"category": "Marknad", "items": ["Volatilitet slår olika mellan stock/crypto", "Likviditet varierar", "Trend och mean reversion kan krocka"]},
+        {"category": "Drift", "items": ["API-budget kan tvinga kortare scanfönster", "Throttle kan ändra urvalstempo", "Cache kan ge blandad färskhet"]},
+        {"category": "Regelverk", "items": ["Riskprofil behöver tydligare viktgränser", "Hög volatilitet bör straffas mer i låg risk", "Diversifiering behöver hålla topplistan bred"]},
+        {"category": "Lärloop", "items": ["Feedback kommer med fördröjning", "Outcome-horisonter blandar olika signaltyper", "Kontinuerlig verifiering saknas ibland"]},
+    ]
+
+    five_w_two_h = [
+        {"label": "What", "value": "AI förbättrar ranking och minskar avvikelser genom interna utfallsdata."},
+        {"label": "Why", "value": f"För att minska felträffar i {dominant_failure_mode} och öka robustheten."},
+        {"label": "Where", "value": "I lärloopen kring outcome-logg, ranking och admin-drift."},
+        {"label": "When", "value": "Vid varje utvärderad scan och vid nästa internverifiering."},
+        {"label": "Who", "value": "AI-systemet självt, men endast som intern analys för admin."},
+        {"label": "How", "value": "Med 8D-rutiner, 5-Why, Fishbone och 5W2H på redan loggade utfall."},
+        {"label": "How much", "value": f"Ingen extra API-kostnad; endast intern bearbetning av {total} outcomes."},
+    ]
+
+    corrective_actions = [
+        "Sänk aggressiviteten när riskprofil och volatilitet inte matchar varandra.",
+        "Justera learning multipliers först när sample size är tillräckligt stort i rätt profil.",
+        "Fortsätt separera strategi, risk och horisont i learning-loggen.",
+        "Verifiera att topplistan förblir diversifierad mellan stock och crypto.",
+    ]
+
+    verification = [
+        "Nästa 20-30 outcomes ska jämföras mot nuvarande win-rate per profil.",
+        "Om samma failure mode upprepas ska containment skärpas innan fler viktjusteringar görs.",
+        "Mät förändring i win-rate per horisont efter varje justering.",
+    ]
+
+    return {
+        "has_data": True,
+        "summary": f"8D internrapport för {total} outcomes. Failure rate {failure_rate:.1f}%.",
+        "sample_size": total,
+        "failure_rate_pct": round(failure_rate, 1),
+        "avg_success_move_pct": round(avg_success_move, 2),
+        "purpose": purpose,
+        "goals": goals,
+        "vision": vision,
+        "problem_statement": problem_statement,
+        "containment": containment,
+        "five_why": [why1, why2, why3, why4, why5],
+        "fishbone": fishbone,
+        "five_w_two_h": five_w_two_h,
+        "corrective_actions": corrective_actions,
+        "verification": verification,
+        "self_correction": self_correction,
+    }
+
+
+def log_scan_trace(scan_started_at, scan_plan, learning_multipliers, result_rows, scan_meta=None):
     outcome_cfg = get_runtime_outcome_config()
+    meta = scan_meta if isinstance(scan_meta, dict) else {}
     payload = {
         "ts": int(scan_started_at),
         "scan_symbols": len(scan_plan.get("symbols", [])),
@@ -1562,6 +2288,8 @@ def log_scan_trace(scan_started_at, scan_plan, learning_multipliers, result_rows
         "learning_sample_size": int(learning_multipliers.get("sample_size", 0)),
         "outcome_horizons": list(outcome_cfg.get("horizons", OUTCOME_HORIZONS)),
         "top_symbols": [r.get("t") for r in (result_rows or [])[:10] if r.get("t")],
+        "strategy_profile": str(meta.get("strategy") or "okänt").strip().lower(),
+        "risk_profile": str(meta.get("risk") or "okänt").strip().lower(),
     }
     _append_jsonl(AI_SCAN_TRACE_FILE, payload)
 
@@ -2381,6 +3109,25 @@ alert_cache = {}
 
 AI_REFRESH_TIME = 86400  # 24 timmar (sekunder)
 
+AI_RUNTIME_STATUS_LOCK = threading.Lock()
+AI_RUNTIME_STATUS = {
+    "last_success_at": 0.0,
+    "last_failure_at": 0.0,
+    "last_run_at": 0.0,
+    "next_run_at": 0.0,
+    "last_duration_sec": 0.0,
+    "last_error": "",
+    "last_run_count": 0,
+    "last_run_mode": "",
+    "last_run_strategy": "",
+    "last_run_risk": "",
+    "last_run_throttled": False,
+    "last_learning_safe_mode": False,
+    "last_promotion_allowed": False,
+    "last_promotion_blocked": False,
+    "last_promotion_reason": "",
+}
+
 
 def ensure_ai_background_loading(strategy="short", risk="medium", capital=10000):
     """Kick off a single background AI refresh when cache is empty."""
@@ -2429,6 +3176,7 @@ def start_periodic_ai_refresh_thread():
         )
         while True:
             runtime_cfg = load_app_settings()
+            effective_interval = get_effective_ai_refresh_interval(runtime_cfg)
             try:
                 safe_fetch(
                     lambda: run_daily_ai(
@@ -2441,7 +3189,7 @@ def start_periodic_ai_refresh_thread():
             except Exception as ex:
                 logger.warning("Background AI refresher loop failed: %s", ex)
 
-            time.sleep(runtime_cfg["ai_background_interval_seconds"])
+            time.sleep(effective_interval)
 
     threading.Thread(target=_loop, daemon=True).start()
     return True
@@ -3832,6 +4580,16 @@ def build_fx_info(fx_rates):
 def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=False):
 
     now = time.time()
+    started_at = now
+    scan_mode = "manual" if force_refresh else "scheduled"
+    update_ai_runtime_status(
+        last_run_at=started_at,
+        last_run_mode=scan_mode,
+        last_run_strategy=strategy,
+        last_run_risk=risk,
+        last_error="",
+        last_run_throttled=False,
+    )
 
     # ✅ cache
     if (not force_refresh) and ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
@@ -3840,15 +4598,35 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     print("🔄 Running AI daily scan...")
 
     result = []
+    app_settings = load_app_settings()
+    api_budget_health = build_api_budget_health(app_settings)
+    learning_guardrails = build_learning_guardrails(app_settings, budget_health=api_budget_health)
 
     with AI_LEARNING_LOCK:
         evaluate_pending_outcomes()
-        learning_multipliers = compute_learning_multipliers()
+        learning_multipliers = compute_learning_multipliers({"strategy": strategy, "risk": risk})
+    self_correction = get_learning_self_correction_state()
 
     symbol_pool = market_scanner()
+    symbol_pool = filter_scan_universe(
+        symbol_pool,
+        app_settings.get("ai_background_whitelist"),
+        app_settings.get("ai_background_blacklist"),
+    )
     previous_ranked = ai_results_cache.get("data") or ai_cache.get("data") or []
     scan_plan = build_hybrid_scan_plan(symbol_pool, previous_ranked=previous_ranked)
     symbols = scan_plan.get("symbols", [])
+    if app_settings.get("ai_background_auto_throttle") and api_budget_health.get("risk_level") == "high":
+        throttle_ratio = 0.35 if learning_guardrails.get("safe_mode_enabled") else 0.5
+        throttle_count = max(12, int(len(symbols) * throttle_ratio))
+        symbols = symbols[:throttle_count]
+        scan_plan = dict(scan_plan)
+        scan_plan["symbols"] = symbols
+        update_ai_runtime_status(last_run_throttled=True)
+    previous_rank_positions = {
+        (row.get("t") or "").strip().upper(): idx for idx, row in enumerate(previous_ranked or [])
+        if (row.get("t") or "").strip()
+    }
 
     stock_assets = get_stock_assets(symbols, use_finnhub=False, include_display_name=False)
 
@@ -3857,7 +4635,8 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     if len(stock_assets) < min_stock_target:
         stock_seen = {a.get("t") for a in stock_assets}
         rescue_symbols = [sym for sym in symbols if sym not in stock_seen]
-        rescue_budget = max(12, min(40, FINNHUB_LIMIT // 2))
+        rescue_cap = 20 if learning_guardrails.get("safe_mode_enabled") else 40
+        rescue_budget = max(8, min(rescue_cap, FINNHUB_LIMIT // 2))
         rescue_symbols = rescue_symbols[:rescue_budget]
         if rescue_symbols:
             logger.info(
@@ -3954,6 +4733,14 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
             ma_weight = 4
             news_weight = 3
 
+        strategy_bias = float((self_correction.get("strategy_bias") or {}).get(strategy, 1.0))
+        risk_bias = float((self_correction.get("risk_bias") or {}).get(risk, 1.0))
+        news_weight_bias = float(self_correction.get("diversification_pressure") or 1.0)
+        trend_weight = max(1, int(round(trend_weight * strategy_bias)))
+        ma_weight = max(1, int(round(ma_weight * strategy_bias)))
+        rsi_weight = max(1, int(round(rsi_weight * risk_bias)))
+        news_weight = max(1, int(round(news_weight * news_weight_bias)))
+
         news_mult = float(learning_multipliers.get("news_mult", 1.0))
         rotation_mult = float(learning_multipliers.get("rotation_mult", 1.0))
 
@@ -4039,11 +4826,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         if trend_score <= 0 and ma_score <= 0:
             total_score -= 2
 
-        s["score"] = max(0, min(100, int(total_score)))
-        s["signal"] = get_signal(price, s["score"])
         s["novelty_bonus"] = round(novelty_bonus, 2)
-        s["reason"] = get_reason(s["signal"], price, s["t"], s)
-        s["summary"] = get_summary(s)
 
         if novelty_base > 0:
             if s["signal"] == "KÖP" or s["score"] >= 75:
@@ -4053,17 +4836,55 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
 
         # ✅ AI confidence (0–100%)
         s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
+
+        # Cheap stability + fairness adjustments without extra API.
+        previous_rank = previous_rank_positions.get(symbol_key)
+        if previous_rank is not None:
+            stability_bonus = 3 if previous_rank < 10 else 2 if previous_rank < 25 else 1
+            stability_bonus = max(1, int(round(stability_bonus * float(self_correction.get("stability_bonus_mult") or 1.0))))
+            total_score += stability_bonus
+            s["stability_bonus"] = stability_bonus
+        else:
+            s["stability_bonus"] = 0
+
+        volatility_pct = estimate_price_volatility_pct(prices)
+        s["volatility_pct"] = round(volatility_pct, 2)
+        volatility_penalty = 0
+        if risk == "low" and volatility_pct >= 4.0:
+            volatility_penalty = min(10, int(round(volatility_pct)))
+        elif risk == "medium" and volatility_pct >= 7.0:
+            volatility_penalty = min(6, int(round(volatility_pct / 2)))
+        if volatility_penalty:
+            volatility_penalty = max(1, int(round(volatility_penalty * float(self_correction.get("volatility_penalty_mult") or 1.0))))
+            total_score -= volatility_penalty
+        s["volatility_penalty"] = volatility_penalty
+
+        asset_type = (s.get("type") or "stock").strip().lower()
+        type_bias = float((self_correction.get("type_bias") or {}).get(asset_type, 1.0))
+        if asset_type == "crypto":
+            type_normalization = -2 if risk in {"low", "medium"} else 0
+            if news_score > 0:
+                type_normalization += 1
+        else:
+            type_normalization = 1 if float(s.get("volume") or 0) > 2_000_000 else 0
+        type_normalization = int(round(type_normalization * type_bias))
+        total_score += type_normalization
+        s["type_normalization"] = type_normalization
        
+        s["score"] = max(0, min(100, int(total_score)))
+        s["signal"] = get_signal(price, s["score"])
+        s["reason"] = get_reason(s["signal"], price, s["t"], s)
+        s["summary"] = get_summary(s)
+
+        # ✅ trigger
+        s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
+
         confidence = (
             s.get("trigger_score", 0) * 20 +
             (s.get("score", 0) / 10)
         )
 
         s["confidence"] = min(100, int(confidence))
-
-
-        # ✅ trigger
-        s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
 
         result.append(s)
 
@@ -4092,6 +4913,24 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     result = unique_result
 
     result = [s for s in result if s["price"] > 0]
+
+    # Simple diversification pass so one asset type does not dominate the top list.
+    type_counts = {}
+    for item in result:
+        asset_type = (item.get("type") or "stock").strip().lower()
+        type_counts[asset_type] = type_counts.get(asset_type, 0) + 1
+
+    if len(result) >= 6:
+        dominant_type, dominant_count = max(type_counts.items(), key=lambda kv: kv[1])
+        if dominant_count > int(len(result) * 0.6):
+            for item in result:
+                asset_type = (item.get("type") or "stock").strip().lower()
+                if asset_type == dominant_type:
+                    item["diversification_penalty"] = 2
+                    item["score"] = max(0, int(item.get("score", 0)) - 2)
+                else:
+                    item["diversification_penalty"] = 0
+            result = sorted(result, key=lambda x: (x.get("trigger_score", 0), x.get("score", 0)), reverse=True)
 
     signal_counts = {"KÖP": 0, "AVVAKTA KÖP": 0, "AVVAKTA": 0, "SÄLJ": 0}
     for item in result:
@@ -4123,13 +4962,30 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     print("--------------------------")
 
     with AI_LEARNING_LOCK:
-        register_scan_outcome_candidates(result, scan_plan, now)
-        log_scan_trace(now, scan_plan, learning_multipliers, result)
+        register_scan_outcome_candidates(result, scan_plan, now, {"strategy": strategy, "risk": risk})
+        log_scan_trace(now, scan_plan, learning_multipliers, result, {"strategy": strategy, "risk": risk})
 
     # ✅ cache
     ai_cache["data"] = result
     ai_cache["last_run"] = now
     ai_results_cache["data"] = result
+    learning_report = persist_learning_8d_report(build_learning_diagnostic_report())
+    if learning_report:
+        if learning_guardrails.get("promotion_allowed"):
+            update_learning_self_correction_state(learning_report)
+        else:
+            logger.info("Learning promotion blocked: %s", learning_guardrails.get("promotion_reason"))
+    update_ai_runtime_status(
+        last_success_at=now,
+        last_duration_sec=round(time.time() - started_at, 2),
+        last_run_count=len(result),
+        last_run_throttled=bool(app_settings.get("ai_background_auto_throttle") and api_budget_health.get("risk_level") == "high"),
+        last_learning_safe_mode=bool(learning_guardrails.get("safe_mode_enabled")),
+        last_promotion_allowed=bool(learning_guardrails.get("promotion_allowed")),
+        last_promotion_blocked=bool(learning_guardrails.get("promotion_blocked")),
+        last_promotion_reason=learning_guardrails.get("promotion_reason") or "",
+        next_run_at=started_at + get_effective_ai_refresh_interval(app_settings),
+    )
     return result
 
 
@@ -4599,6 +5455,116 @@ def apply_portfolio_ai_actions(user, sell_list, buy_more_list, do_sell=False, do
             price = float(item.get("price") or item.get("avg_price") or 0)
             if qty > 0 and price > 0:
                 buy(user, item["t"], qty, price)
+
+
+def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, include_analysis=True):
+    ranked_index = {}
+    for row in ranked_rows or []:
+        symbol = (row.get("t") or "").strip().upper()
+        if symbol:
+            ranked_index[symbol] = row
+
+    positions = []
+    sell_list = []
+    buy_more_list = []
+    wait_list = []
+    total_cost = 0.0
+    total_value = 0.0
+
+    for source_row in portfolio_rows or []:
+        s = dict(source_row)
+        symbol = (s.get("t") or "").strip().upper()
+        if not symbol:
+            continue
+
+        match = ranked_index.get(symbol)
+        if match:
+            s["name"] = match.get("name", s.get("name", symbol))
+            s["display_name"] = match.get("display_name", f"{s['name']} ({symbol})")
+
+        qty = int(s.get("qty") or 0)
+        avg_price = float(s.get("avg_price") or 0)
+        if qty <= 0 or avg_price <= 0:
+            continue
+
+        current_price = avg_price
+        if match:
+            current_price = match.get("price", avg_price)
+            if isinstance(current_price, dict):
+                current_price = current_price.get("price", avg_price)
+        try:
+            current_price = float(current_price or avg_price)
+        except Exception:
+            current_price = avg_price
+
+        cost = qty * avg_price
+        current_value = qty * current_price
+        pl_value = current_value - cost
+        pl_pct = ((pl_value / cost) * 100) if cost else 0.0
+
+        decision, reason = portfolio_ai_decision(pl_pct, current_price, avg_price, symbol, pf_risk, pf_strategy)
+        decision = normalize_portfolio_decision(decision)
+
+        s["t"] = symbol
+        s["price"] = current_price
+        s["cost"] = round(cost, 2)
+        s["current_value"] = round(current_value, 2)
+        s["pl"] = round(pl_value, 2)
+        s["pl_pct"] = round(pl_pct, 2)
+        s["decision"] = decision
+        s["reason"] = reason
+        s["signal"] = decision
+        s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
+        s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
+
+        if decision == "SÄLJ" and s["recommended_sell_qty"] >= qty:
+            s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
+        elif decision == "SÄLJ":
+            s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {qty}"
+        else:
+            s["sell_recommendation_text"] = ""
+
+        if include_analysis:
+            hist_data = get_historical_data(symbol, "3mo")
+            prices = []
+            if hist_data:
+                try:
+                    prices = hist_data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+                    prices = [p for p in prices if p]
+                except Exception:
+                    prices = []
+            s["portfolio_analysis"] = generate_portfolio_analysis(s, decision, pl_pct, prices)
+
+        positions.append(s)
+        total_cost += cost
+        total_value += current_value
+
+        if decision == "SÄLJ":
+            sell_list.append(s)
+        elif decision == "KÖP MER":
+            buy_more_list.append(s)
+        else:
+            wait_list.append(s)
+
+    total_pl = total_value - total_cost
+    total_pl_pct = ((total_pl / total_cost) * 100) if total_cost else 0.0
+
+    summary = {
+        "count": len(positions),
+        "total_cost": round(total_cost, 2),
+        "total_value": round(total_value, 2),
+        "total_pl": round(total_pl, 2),
+        "total_pl_pct": round(total_pl_pct, 2),
+        "is_positive": total_pl >= 0,
+    }
+
+    return {
+        "positions": positions,
+        "sell_list": sell_list,
+        "buy_more_list": buy_more_list,
+        "wait_list": wait_list,
+        "summary": summary,
+    }
 
 # ===== DATA (portfolio & trades) =====
 # ===== DATA =====
@@ -7310,9 +8276,9 @@ def dashboard():
     platform_links = build_platform_links(user_platforms)
     platform_names = build_platform_names_for_header(user_platforms)
     requested_tab = request.args.get("tab") or request.form.get("active_tab") or "dashboard"
-    if requested_tab not in {"dashboard", "portfolio", "mintrend", "users", "ai_background"}:
+    if requested_tab not in {"dashboard", "portfolio", "mintrend", "users", "ai_background", "8d_reports"}:
         requested_tab = "dashboard"
-    if requested_tab in {"users", "ai_background"} and not is_admin:
+    if requested_tab in {"users", "ai_background", "8d_reports"} and not is_admin:
         requested_tab = "dashboard"
     active_tab = requested_tab
     fast_login_bootstrap = bool(session.pop("fast_login_bootstrap", False))
@@ -7351,6 +8317,16 @@ def dashboard():
     session["mintrend_currency"] = mintrend_currency
 
     if request.method == "POST" and is_admin:
+        if "admin_run_ai_now" in request.form:
+            run_result = run_daily_ai(
+                strategy=app_settings.get("ai_background_strategy", AI_BACKGROUND_DEFAULT_STRATEGY),
+                risk=app_settings.get("ai_background_risk", AI_BACKGROUND_DEFAULT_RISK),
+                capital=app_settings.get("ai_background_capital", AI_BACKGROUND_DEFAULT_CAPITAL),
+                force_refresh=True,
+            )
+            session["users_msg"] = f"✅ AI-manuellkörning klar: {len(run_result)} kandidater"
+            return redirect("/dashboard?tab=ai_background")
+
         if "admin_apply_outcome_preset" in request.form:
             preset_key = (request.form.get("outcome_preset") or "mix").strip().lower()
             preset_horizons = outcome_preset_horizons(preset_key)
@@ -7401,6 +8377,26 @@ def dashboard():
                 risk_value = app_settings.get("ai_background_risk", AI_BACKGROUND_DEFAULT_RISK)
 
             force_refresh_value = request.form.get("ai_background_force_refresh") == "on"
+            auto_throttle_value = request.form.get("ai_background_auto_throttle") == "on"
+            safe_mode_value = request.form.get("ai_learning_safe_mode") == "on"
+
+            promotion_min_samples_raw = (request.form.get("ai_learning_promotion_min_samples") or "").strip()
+            promotion_min_win_rate_raw = (request.form.get("ai_learning_promotion_min_win_rate") or "").strip()
+
+            try:
+                promotion_min_samples_value = int(promotion_min_samples_raw)
+            except Exception:
+                promotion_min_samples_value = app_settings.get("ai_learning_promotion_min_samples", AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT)
+            promotion_min_samples_value = max(10, min(5000, promotion_min_samples_value))
+
+            try:
+                promotion_min_win_rate_value = float(promotion_min_win_rate_raw)
+            except Exception:
+                promotion_min_win_rate_value = app_settings.get("ai_learning_promotion_min_win_rate", AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT)
+            promotion_min_win_rate_value = max(0.0, min(100.0, promotion_min_win_rate_value))
+
+            whitelist_value = _parse_csv_symbol_list(request.form.get("ai_background_whitelist"))
+            blacklist_value = _parse_csv_symbol_list(request.form.get("ai_background_blacklist"))
 
             app_settings = save_app_settings(
                 {
@@ -7409,6 +8405,12 @@ def dashboard():
                     "ai_background_strategy": strategy_value,
                     "ai_background_risk": risk_value,
                     "ai_background_capital": capital_value,
+                    "ai_background_auto_throttle": auto_throttle_value,
+                    "ai_learning_safe_mode": safe_mode_value,
+                    "ai_learning_promotion_min_samples": promotion_min_samples_value,
+                    "ai_learning_promotion_min_win_rate": promotion_min_win_rate_value,
+                    "ai_background_whitelist": whitelist_value,
+                    "ai_background_blacklist": blacklist_value,
                 }
             )
             outcome_cfg = get_runtime_outcome_config(app_settings)
@@ -7620,67 +8622,23 @@ def dashboard():
     sell_list = []
     buy_more_list = []
     wait_list = []
+    portfolio_summary = {
+        "count": 0,
+        "total_cost": 0.0,
+        "total_value": 0.0,
+        "total_pl": 0.0,
+        "total_pl_pct": 0.0,
+        "is_positive": True,
+    }
 
     if not quick_bootstrap:
         pf = portfolio(user)
-
-        for s in pf:
-            match = next((x for x in ranked if x["t"] == s["t"]), None)
-
-            if match:
-                current_price = match["price"]
-
-                if isinstance(current_price, dict):
-                    current_price = current_price.get("price", s["avg_price"])
-            else:
-                current_price = s["avg_price"]
-
-            pl_pct = (
-                (current_price - s["avg_price"]) / s["avg_price"] * 100
-                if s["avg_price"] else 0
-            )
-
-            decision, reason = portfolio_ai_decision(
-                pl_pct,
-                current_price,
-                s["avg_price"],
-                s["t"],
-                pf_risk,
-                pf_strategy
-            )
-            decision = normalize_portfolio_decision(decision)
-
-            s["price"] = current_price
-            s["decision"] = decision
-            s["reason"] = reason
-            s["pl_pct"] = pl_pct
-            s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
-            s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
-            if decision == "SÄLJ" and s["recommended_sell_qty"] >= s.get("qty", 0):
-                s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
-            elif decision == "SÄLJ":
-                s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
-            else:
-                s["sell_recommendation_text"] = ""
-
-            # ✅ GENERATE PORTFOLIO ANALYSIS
-            hist_data = get_historical_data(s["t"], "3mo")
-            prices = []
-            if hist_data:
-                try:
-                    prices = hist_data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-                    prices = [p for p in prices if p]
-                except:
-                    prices = []
-
-            s["portfolio_analysis"] = generate_portfolio_analysis(s, decision, pl_pct, prices)
-
-            if decision == "SÄLJ":
-                sell_list.append(s)
-            elif decision == "KÖP MER":
-                buy_more_list.append(s)
-            else:
-                wait_list.append(s)
+        view = build_portfolio_view(pf, ranked, pf_strategy, pf_risk, include_analysis=True)
+        pf = view["positions"]
+        sell_list = view["sell_list"]
+        buy_more_list = view["buy_more_list"]
+        wait_list = view["wait_list"]
+        portfolio_summary = view["summary"]
 
     # ✅ ✅ VIKTIGT: UTANFÖR LOOPEN
 
@@ -7798,6 +8756,14 @@ def dashboard():
     else:  # mix
         stocks = stock_display_candidates[:top_n]
         crypto = crypto_display_candidates[:top_n]
+
+    # Dashboard-kandidater ska inte visa portfölj-P/L eftersom dessa inte är köpta innehav ännu.
+    for _row in (stocks + crypto + top_global):
+        if isinstance(_row, dict):
+            _row.pop("pl", None)
+            _row.pop("pl_pct", None)
+            _row.pop("current_value", None)
+            _row.pop("cost", None)
 
     # stocks = enrich_with_fundamentals(stocks)  # ⏳ DISABLED: Too slow with rate-limited API - causing dashboard timeouts
     # TODO: Implement async fundamentals fetching or client-side enrichment
@@ -7929,7 +8895,17 @@ def dashboard():
     users_msg = session.pop("users_msg", "")
     api_budget_health = build_api_budget_health(app_settings)
     learning_status = build_learning_status()
+    learning_guardrails = build_learning_guardrails(app_settings, learning_status, api_budget_health)
     learning_progress = build_learning_progress_indicator()
+    ai_runtime_status = build_ai_runtime_status()
+    ai_quality_overview = build_quality_overview()
+    learning_diagnostic_report = build_learning_diagnostic_report()
+    eight_d_reports = build_8d_report_archive()
+    if not eight_d_reports and learning_diagnostic_report.get("has_data"):
+        persisted_report = persist_learning_8d_report(learning_diagnostic_report)
+        if persisted_report:
+            update_learning_self_correction_state(persisted_report)
+            eight_d_reports = build_8d_report_archive()
     learning_storage_status = build_learning_storage_status()
     registered_users = load_registered_users() if is_admin else []
     regular_users = []
@@ -8013,8 +8989,13 @@ def dashboard():
         mintrend_fx_info=mintrend_fx_info,
         ai_background_settings=app_settings,
         api_budget_health=api_budget_health,
+        learning_guardrails=learning_guardrails,
         learning_status=learning_status,
         learning_progress=learning_progress,
+        ai_runtime_status=ai_runtime_status,
+        ai_quality_overview=ai_quality_overview,
+        learning_diagnostic_report=learning_diagnostic_report,
+        eight_d_reports=eight_d_reports,
         learning_storage_status=learning_storage_status,
         background_enabled=ENABLE_BACKGROUND,
         free_api_mode=FREE_API_MODE,
@@ -8022,6 +9003,23 @@ def dashboard():
         outcome_success_move_pct=outcome_cfg["success_move_pct"],
         outcome_preset_key=outcome_cfg["preset_key"],
     )
+
+
+@app.route("/reports/8d/<path:filename>")
+def report_8d_txt(filename):
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+    if not is_admin_email(user):
+        return "Forbidden", 403
+
+    safe_name = os.path.basename(filename or "")
+    if not safe_name.lower().endswith(".txt"):
+        return "Not found", 404
+    full_path = os.path.join(_report_8d_dir(), safe_name)
+    if not os.path.exists(full_path):
+        return "Not found", 404
+    return send_file(full_path, mimetype="text/plain", as_attachment=False)
 
 
 @app.route("/portfolio", methods=["GET", "POST"])
@@ -8107,59 +9105,12 @@ def portfolio_page():
     )
 
     pf = portfolio(user)
-
-    sell_list = []
-    buy_more_list = []
-    wait_list = []
-
-    for s in pf:
-        match = next((x for x in ranked if x["t"] == s["t"]), None)
-        if match:
-            s["name"] = match.get("name", s["t"])
-            s["display_name"] = match.get("display_name", f"{s['name']} ({s['t']})")
-
-        current_price = next(
-            (x["price"] for x in ranked if x["t"] == s["t"]),
-            s["avg_price"]
-        )
-        
-        if isinstance(current_price, dict):
-            current_price = current_price.get("price", s["avg_price"])
-
-        pl_pct = (
-            (current_price - s["avg_price"]) / s["avg_price"] * 100
-            if s["avg_price"] else 0
-        )
-
-        decision, reason = portfolio_ai_decision(
-            pl_pct,
-            current_price,
-            s["avg_price"],
-            s["t"],
-            pf_risk,
-            pf_strategy
-        )
-        decision = normalize_portfolio_decision(decision)
-
-        s["price"] = current_price
-        s["reason"] = reason
-        s["signal"] = decision
-        s["pl_pct"] = pl_pct
-        s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
-        s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
-        if decision == "SÄLJ" and s["recommended_sell_qty"] >= s.get("qty", 0):
-            s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
-        elif decision == "SÄLJ":
-            s["sell_recommendation_text"] = f"AI rekommenderar: Sälj {s['recommended_sell_qty']} av {s.get('qty', 0)}"
-        else:
-            s["sell_recommendation_text"] = ""
-
-        if decision == "SÄLJ":
-            sell_list.append(s)
-        elif decision == "KÖP MER":
-            buy_more_list.append(s)
-        else:
-            wait_list.append(s)
+    view = build_portfolio_view(pf, ranked, pf_strategy, pf_risk, include_analysis=True)
+    pf = view["positions"]
+    sell_list = view["sell_list"]
+    buy_more_list = view["buy_more_list"]
+    wait_list = view["wait_list"]
+    portfolio_summary = view["summary"]
 
     if request.method == "POST":
         if "sell_all_holdings" in request.form:
@@ -8248,6 +9199,7 @@ def portfolio_page():
         sell_list=sell_list,
         buy_more_list=buy_more_list,
         wait_list=wait_list,
+        portfolio_summary=portfolio_summary,
         pf_strategy=pf_strategy,
         pf_risk=pf_risk,
         capital_currency=session.get("capital_currency", "SEK"),
