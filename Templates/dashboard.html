@@ -1775,9 +1775,14 @@
             Visar {{ stocks|length }} av {{ top_n }} aktier och {{ crypto|length }} av {{ top_n }} krypto (KÖP först,
             annars AVVAKTA KÖP).
             {% endif %}
-            {% if emergency_recommendations %}
-            <br>Reservläge aktivt: visar tillfälliga kandidater medan full AI-scan laddar.
-            {% endif %}
+            {% if (priority == "stocks" and stocks|length < top_n) or (priority=="crypto" and crypto|length < top_n) or
+                (priority=="mix" and (stocks|length < top_n or crypto|length < top_n)) %} <br>Notis: Antalet kan bli
+                lägre vid svag signal eller datagap. Systemet använder bred fallback från rankad
+                pool för att komma så nära {{ top_n }} som möjligt.
+                {% endif %}
+                {% if emergency_recommendations %}
+                <br>Reservläge aktivt: visar tillfälliga kandidater medan full AI-scan laddar.
+                {% endif %}
         </div>
 
         {% set buy_count = stocks|length + crypto|length %}
@@ -2366,6 +2371,180 @@
         {% if users_msg %}
         <div class="selection-note">{{ users_msg }}</div>
         {% endif %}
+
+        <div class="box" style="margin-top:16px;">
+            <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <use href="#icon-target"></use>
+                </svg>AI Bakgrundsscan</h3>
+            <p style="margin:0 0 10px; color: var(--muted);">
+                Styr global scan som körs periodiskt i bakgrunden.
+                {% if background_enabled %}
+                ENABLE_BACKGROUND är aktivt.
+                {% else %}
+                ENABLE_BACKGROUND är avstängt i miljön, så loopen körs inte.
+                {% endif %}
+                {% if free_api_mode %}
+                FREE_API_MODE är aktivt med snålare standardvärden.
+                {% endif %}
+                <br>
+                Learning storage backend:
+                {% if learning_storage_status.using_db %}
+                <span style="color:#70E000;"><b>{{ learning_storage_status.backend }}</b></span>
+                {% else %}
+                <span style="color:#f4b400;"><b>{{ learning_storage_status.backend }}</b></span>
+                {% endif %}
+                ({{ learning_storage_status.detail }}).
+            </p>
+            <form method="POST" style="display:grid; gap:10px; max-width:580px;">
+                <input type="hidden" name="active_tab" value="users">
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(125, 211, 252, 0.28);">
+                    <b>API Budget Health</b><br>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        Risknivå:
+                        {% if api_budget_health.risk_level == "high" %}
+                        <span style="color:#f87171;"><b>Hög</b></span>
+                        {% elif api_budget_health.risk_level == "medium" %}
+                        <span style="color:#f4b400;"><b>Medel</b></span>
+                        {% else %}
+                        <span style="color:#70E000;"><b>Låg</b></span>
+                        {% endif %}
+                        ({{ api_budget_health.quote_pressure_pct }}% av Yahoo-budget/timme)<br>
+                        {{ api_budget_health.risk_text }}<br>
+                        Körningar/timme: <b>{{ api_budget_health.runs_per_hour }}</b> | Kandidater/scan:
+                        <b>{{ api_budget_health.expected_scan_candidates }}</b><br>
+                        Estimerade quote-anrop/scan: <b>{{ api_budget_health.est_quote_calls_per_run }}</b> |
+                        /timme: <b>{{ api_budget_health.est_quote_calls_per_hour }}</b><br>
+                        Yahoo-budget/timme: <b>{{ api_budget_health.yahoo_budget_per_hour }}</b>
+                        ({{ api_budget_health.yahoo_limit_per_min }}/min)<br>
+                        Rekommendation: <b>{{ api_budget_health.recommendation_text }}</b>
+                    </span>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(112, 224, 0, 0.30);">
+                    <b>Learning Status</b><br>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        {% if learning_status.has_data %}
+                        Träningsutfall: <b>{{ learning_status.total_outcomes }}</b> | Win-rate: <b>{{
+                            learning_status.success_rate_pct }}%</b><br>
+                        Genomsnittlig rörelse: <b>{{ learning_status.avg_move_pct }}%</b> | Senast utvärderad: <b>{{
+                            learning_status.latest_resolved }}</b><br>
+                        Multipliers: news <b>{{ learning_status.learning_news_mult }}</b>, rotation <b>{{
+                            learning_status.learning_rotation_mult }}</b> (sample {{ learning_status.sample_size }})<br>
+                        Horisonter:
+                        {% for h in learning_status.horizon_rows %}
+                        <span style="white-space:nowrap;">{{ h.horizon_hours }}h {{ h.win_rate_pct }}% (n={{ h.total
+                            }})</span>{% if not loop.last %} | {% endif %}
+                        {% endfor %}
+                        {% else %}
+                        Ingen outcome-historik ännu. Systemet loggar nu 6h/24h/72h och börjar justera vikter när
+                        tillräckligt data finns.
+                        {% endif %}
+                    </span>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(56, 189, 248, 0.30);">
+                    <b>Learning Progress</b><br>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        Mognad: <b>{{ learning_progress.stage }}</b> ({{ learning_progress.maturity_score }}%)<br>
+                        Utfall: <b>{{ learning_progress.total_outcomes }}</b> av mål <b>{{
+                            learning_progress.target_outcomes }}</b> | Datatäckning: <b>{{
+                            learning_progress.sample_progress }}%</b> | Stabilitet: <b>{{
+                            learning_progress.stability }}%</b><br>
+                        {{ learning_progress.stage_text }}
+                    </span>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(244, 180, 0, 0.30);">
+                    <b>Instruktion: Outcome Horizons</b><br>
+                    <span style="color: var(--muted); font-size:0.9rem;">
+                        Aktiv preset: <b>{{ outcome_preset_key|upper }}</b> | Aktiva horisonter: <b>{{
+                            outcome_horizons|join(', ') }}h</b>.<br>
+                        Vad det innebär: samma AI-rekommendation utvärderas efter varje horisont (t.ex. 6h, 24h, 72h)
+                        för att mäta om signalen faktiskt gav positiv rörelse.<br>
+                        Success-kriterium i nuläget: <b>+{{ outcome_success_move_pct }}%</b> eller bättre vid
+                        utvärdering.<br>
+                        Vad du kan välja:
+                        <span style="white-space:nowrap;"><b>Kort</b> 3,6,12h</span> |
+                        <span style="white-space:nowrap;"><b>Mix</b> 6,24,72h</span> |
+                        <span style="white-space:nowrap;"><b>Swing</b> 24,48,72h</span><br>
+                        Effekt: kortare horisonter ger snabbare inlärning men mer brus; längre horisonter ger
+                        stabilare signal men långsammare inlärning.
+                    </span>
+                </div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                    <label style="display:grid; gap:6px; min-width:220px;">
+                        <span style="color: var(--muted); font-size:0.9rem;">Välj Outcome-preset</span>
+                        <select name="outcome_preset">
+                            <option value="short" {% if outcome_preset_key=="short" %}selected{% endif %}>Kort (3,6,12h)
+                            </option>
+                            <option value="mix" {% if outcome_preset_key=="mix" %}selected{% endif %}>Mix (6,24,72h)
+                            </option>
+                            <option value="swing" {% if outcome_preset_key=="swing" %}selected{% endif %}>Swing
+                                (24,48,72h)</option>
+                        </select>
+                    </label>
+                    <button type="submit" name="admin_apply_outcome_preset" value="1"
+                        style="background: rgba(56, 189, 248, 0.18); border-color: rgba(56, 189, 248, 0.36);">
+                        Spara Outcome-preset
+                    </button>
+                </div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button type="submit" name="admin_apply_free_api_profile" value="1"
+                        style="background: rgba(244, 180, 0, 0.2); border-color: rgba(244, 180, 0, 0.38);">
+                        Använd gratis-API profil
+                    </button>
+                </div>
+
+                <label>
+                    Intervall (sekunder):<br>
+                    <input type="number" min="60" max="86400" step="60" name="ai_background_interval_seconds"
+                        value="{{ ai_background_settings.ai_background_interval_seconds }}">
+                </label>
+
+                <label>
+                    Strategi:<br>
+                    <select name="ai_background_strategy">
+                        <option value="short" {% if ai_background_settings.ai_background_strategy=="short" %}selected{%
+                            endif %}>Kort</option>
+                        <option value="long" {% if ai_background_settings.ai_background_strategy=="long" %}selected{%
+                            endif %}>Lång</option>
+                        <option value="balanced" {% if ai_background_settings.ai_background_strategy=="balanced"
+                            %}selected{% endif %}>Balans</option>
+                    </select>
+                </label>
+
+                <label>
+                    Riskprofil:<br>
+                    <select name="ai_background_risk">
+                        <option value="low" {% if ai_background_settings.ai_background_risk=="low" %}selected{% endif
+                            %}>Låg</option>
+                        <option value="medium" {% if ai_background_settings.ai_background_risk=="medium" %}selected{%
+                            endif %}>Medel</option>
+                        <option value="high" {% if ai_background_settings.ai_background_risk=="high" %}selected{% endif
+                            %}>Hög</option>
+                    </select>
+                </label>
+
+                <label>
+                    Kapital för scan (USD):<br>
+                    <input type="number" min="100" max="10000000" step="100" name="ai_background_capital"
+                        value="{{ ai_background_settings.ai_background_capital }}">
+                </label>
+
+                <label style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" name="ai_background_force_refresh" {% if
+                        ai_background_settings.ai_background_force_refresh %}checked{% endif %}>
+                    Tvinga ny full scan varje körning
+                </label>
+
+                <div>
+                    <button type="submit" name="admin_save_ai_background" value="1">Spara AI-bakgrundsscan</button>
+                </div>
+            </form>
+        </div>
 
         <div class="container" style="margin-top:20px;">
 

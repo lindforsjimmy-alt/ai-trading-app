@@ -95,6 +95,7 @@ ENABLE_BACKGROUND = os.environ.get("ENABLE_BACKGROUND", "false").lower() in ("1"
 ALERT_LOG_FILE = os.environ.get("ALERT_LOG_FILE", "stock_data/alerts.log")
 IS_RENDER = os.environ.get("RENDER", "").strip().lower() in ("1", "true", "yes")
 LEAN_MODE = os.environ.get("LEAN_MODE", "1" if IS_RENDER else "0").strip().lower() in ("1", "true", "yes")
+FREE_API_MODE = (os.environ.get("FREE_API_MODE") or "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_int(name, default):
@@ -106,6 +107,76 @@ def _env_int(name, default):
     except Exception:
         return int(default)
     return max(1, value)
+
+
+def _env_bool(name, default=False):
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in ("1", "true", "yes", "on")
+
+
+AI_BACKGROUND_SCAN_INTERVAL_SECONDS = _env_int(
+    "AI_BACKGROUND_SCAN_INTERVAL_SECONDS",
+    5400 if FREE_API_MODE else 1800,
+)
+AI_BACKGROUND_SCAN_FORCE_REFRESH = _env_bool(
+    "AI_BACKGROUND_SCAN_FORCE_REFRESH",
+    False if FREE_API_MODE else True,
+)
+AI_BACKGROUND_DEFAULT_STRATEGY = (os.environ.get("AI_BACKGROUND_DEFAULT_STRATEGY") or "short").strip().lower()
+AI_BACKGROUND_DEFAULT_RISK = (os.environ.get("AI_BACKGROUND_DEFAULT_RISK") or "medium").strip().lower()
+AI_BACKGROUND_DEFAULT_CAPITAL = _env_int("AI_BACKGROUND_DEFAULT_CAPITAL", 5000 if FREE_API_MODE else 10000)
+
+HYBRID_SCAN_CORE_SIZE = _env_int("HYBRID_SCAN_CORE_SIZE", 90 if FREE_API_MODE else 130)
+HYBRID_SCAN_ROTATION_WINDOW = _env_int("HYBRID_SCAN_ROTATION_WINDOW", 90 if FREE_API_MODE else 130)
+HYBRID_NEWS_TRIGGER_SAMPLE_SIZE = _env_int("HYBRID_NEWS_TRIGGER_SAMPLE_SIZE", 24 if FREE_API_MODE else 40)
+HYBRID_NEWS_TRIGGER_MAX_SYMBOLS = _env_int("HYBRID_NEWS_TRIGGER_MAX_SYMBOLS", 8 if FREE_API_MODE else 14)
+HYBRID_ROTATION_BONUS = float(os.environ.get("HYBRID_ROTATION_BONUS", "2.0"))
+HYBRID_NEWS_BONUS = float(os.environ.get("HYBRID_NEWS_BONUS", "5.0"))
+HYBRID_NOVELTY_DECAY_PER_MISS = float(os.environ.get("HYBRID_NOVELTY_DECAY_PER_MISS", "1.5"))
+
+OUTCOME_HORIZON_HOURS = _env_int("OUTCOME_HORIZON_HOURS", 24)
+OUTCOME_TRACK_TOP_N = _env_int("OUTCOME_TRACK_TOP_N", 20)
+OUTCOME_SUCCESS_MOVE_PCT = float(os.environ.get("OUTCOME_SUCCESS_MOVE_PCT", "1.0"))
+LEARNING_MIN_OUTCOMES = _env_int("LEARNING_MIN_OUTCOMES", 25)
+LEARNING_MAX_ROWS = _env_int("LEARNING_MAX_ROWS", 500)
+
+
+def _parse_outcome_horizons(raw_value):
+    raw = (raw_value or "").strip()
+    if not raw:
+        return [6, 24, 72]
+
+    out = []
+    seen = set()
+    for part in raw.split(","):
+        txt = (part or "").strip()
+        if not txt:
+            continue
+        try:
+            value = int(txt)
+        except Exception:
+            continue
+        value = max(1, min(720, value))
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+
+    if not out:
+        return [6, 24, 72]
+
+    out.sort()
+    return out[:6]
+
+
+OUTCOME_HORIZONS = _parse_outcome_horizons(os.environ.get("OUTCOME_HORIZONS", "6,24,72"))
+
+if AI_BACKGROUND_DEFAULT_STRATEGY not in {"short", "long", "balanced"}:
+    AI_BACKGROUND_DEFAULT_STRATEGY = "short"
+if AI_BACKGROUND_DEFAULT_RISK not in {"low", "medium", "high"}:
+    AI_BACKGROUND_DEFAULT_RISK = "medium"
 
 
 def _scan_profile_defaults(lean_mode):
@@ -159,7 +230,8 @@ def _scan_profile_defaults(lean_mode):
     }
 
 
-AI_SCAN_PROFILE = (os.environ.get("AI_SCAN_PROFILE") or ("balanced" if LEAN_MODE else "aggressive")).strip().lower()
+_default_scan_profile = "stable" if FREE_API_MODE else ("balanced" if LEAN_MODE else "aggressive")
+AI_SCAN_PROFILE = (os.environ.get("AI_SCAN_PROFILE") or _default_scan_profile).strip().lower()
 PROFILE_DEFAULTS = _scan_profile_defaults(LEAN_MODE)
 if AI_SCAN_PROFILE not in PROFILE_DEFAULTS:
     AI_SCAN_PROFILE = "balanced"
@@ -183,14 +255,23 @@ NEWS_REQUEST_TIMEOUT = float(os.environ.get("NEWS_REQUEST_TIMEOUT", "3.5"))
 YAHOO_BLOCK_SECONDS = _env_int("YAHOO_BLOCK_SECONDS", 600)
 POLYGON_BLOCK_SECONDS = _env_int("POLYGON_BLOCK_SECONDS", 600)
 IEX_BLOCK_SECONDS = _env_int("IEX_BLOCK_SECONDS", 600)
-YAHOO_LIMIT_PER_MIN = _env_int("YAHOO_LIMIT_PER_MIN", 120 if LEAN_MODE else 240)
-POLYGON_LIMIT_PER_MIN = _env_int("POLYGON_LIMIT_PER_MIN", 25 if LEAN_MODE else 60)
-IEX_LIMIT_PER_MIN = _env_int("IEX_LIMIT_PER_MIN", 25 if LEAN_MODE else 60)
+YAHOO_LIMIT_PER_MIN = _env_int(
+    "YAHOO_LIMIT_PER_MIN",
+    60 if FREE_API_MODE else (120 if LEAN_MODE else 240),
+)
+POLYGON_LIMIT_PER_MIN = _env_int(
+    "POLYGON_LIMIT_PER_MIN",
+    10 if FREE_API_MODE else (25 if LEAN_MODE else 60),
+)
+IEX_LIMIT_PER_MIN = _env_int(
+    "IEX_LIMIT_PER_MIN",
+    10 if FREE_API_MODE else (25 if LEAN_MODE else 60),
+)
 
 POLYGON_API_KEY = (os.environ.get("POLYGON_API_KEY") or "").strip()
 IEX_API_KEY = (os.environ.get("IEX_API_KEY") or os.environ.get("IEX_TOKEN") or "").strip()
 
-DEFAULT_PRICE_PROVIDER_ORDER = "finnhub,polygon,iex,yahoo"
+DEFAULT_PRICE_PROVIDER_ORDER = "yahoo,finnhub,polygon,iex" if FREE_API_MODE else "finnhub,polygon,iex,yahoo"
 PRICE_PROVIDER_ORDER = [
     p.strip().lower()
     for p in (os.environ.get("PRICE_PROVIDER_ORDER") or DEFAULT_PRICE_PROVIDER_ORDER).split(",")
@@ -198,8 +279,9 @@ PRICE_PROVIDER_ORDER = [
 ]
 
 logger.info(
-    "AI scan profile=%s | MARKET_SYMBOL_LIMIT=%s SCAN_CANDIDATE_LIMIT=%s MAX_DEEP_ANALYSIS_CANDIDATES=%s AI_CRYPTO_LIMIT=%s COINGECKO_PAGES=%s",
+    "AI scan profile=%s | free_api_mode=%s | MARKET_SYMBOL_LIMIT=%s SCAN_CANDIDATE_LIMIT=%s MAX_DEEP_ANALYSIS_CANDIDATES=%s AI_CRYPTO_LIMIT=%s COINGECKO_PAGES=%s",
     AI_SCAN_PROFILE,
+    FREE_API_MODE,
     MARKET_SYMBOL_LIMIT,
     SCAN_CANDIDATE_LIMIT,
     MAX_DEEP_ANALYSIS_CANDIDATES,
@@ -232,11 +314,23 @@ USERS_FILE = "stock_data/users.txt"
 ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
 USER_SETTINGS_FILE = "stock_data/user_settings.json"
+APP_SETTINGS_FILE = "stock_data/app_settings.json"
+AI_PENDING_OUTCOMES_FILE = "stock_data/ai_pending_outcomes.jsonl"
+AI_OUTCOMES_LOG_FILE = "stock_data/ai_outcomes_log.jsonl"
+AI_SCAN_TRACE_FILE = "stock_data/ai_scan_trace.jsonl"
 SOLD_TRADES_FILE = "stock_data/sold_trades.txt"
 GLOBAL_TICKERS_FILE = "stock_data/global_tickers.txt"
 OMX_TICKERS_FILE = "stock_data/omx_tickers.csv"
 USER_SETTINGS_LOCK = threading.Lock()
+APP_SETTINGS_LOCK = threading.Lock()
+AI_LEARNING_LOCK = threading.Lock()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+LEARNING_DB_TABLE_BY_FILE = {
+    AI_PENDING_OUTCOMES_FILE: "ai_pending_outcomes",
+    AI_OUTCOMES_LOG_FILE: "ai_outcomes_log",
+    AI_SCAN_TRACE_FILE: "ai_scan_trace",
+}
 
 
 def db_enabled():
@@ -595,6 +689,44 @@ def ensure_runtime_schema():
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_trade_sales_user_loss ON trade_sales (user_id, sold_with_loss)"
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_pending_outcomes (
+                        symbol TEXT NOT NULL,
+                        horizon_hours INTEGER NOT NULL,
+                        payload JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (symbol, horizon_hours)
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_ai_pending_outcomes_updated ON ai_pending_outcomes (updated_at DESC)"
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_outcomes_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_ai_outcomes_log_created ON ai_outcomes_log (created_at DESC)"
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_scan_trace (
+                        id BIGSERIAL PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_ai_scan_trace_created ON ai_scan_trace (created_at DESC)"
+                )
             conn.commit()
     except Exception as ex:
         logger.warning("DB runtime schema ensure failed: %s", ex)
@@ -718,6 +850,720 @@ open(SOLD_TRADES_FILE, "a").close()
 if not os.path.exists(USER_SETTINGS_FILE):
     with open(USER_SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump({}, f)
+if not os.path.exists(APP_SETTINGS_FILE):
+    with open(APP_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+open(AI_PENDING_OUTCOMES_FILE, "a", encoding="utf-8").close()
+open(AI_OUTCOMES_LOG_FILE, "a", encoding="utf-8").close()
+open(AI_SCAN_TRACE_FILE, "a", encoding="utf-8").close()
+
+NOVELTY_MISS_COUNTER = {}
+
+
+def _normalize_background_scheduler_settings(raw_data):
+    data = raw_data if isinstance(raw_data, dict) else {}
+
+    try:
+        interval = int(data.get("ai_background_interval_seconds", AI_BACKGROUND_SCAN_INTERVAL_SECONDS))
+    except Exception:
+        interval = AI_BACKGROUND_SCAN_INTERVAL_SECONDS
+    interval = max(60, min(86400, interval))
+
+    force_raw = data.get("ai_background_force_refresh", AI_BACKGROUND_SCAN_FORCE_REFRESH)
+    if isinstance(force_raw, bool):
+        force_refresh = force_raw
+    else:
+        force_refresh = str(force_raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    strategy = str(
+        data.get("ai_background_strategy", AI_BACKGROUND_DEFAULT_STRATEGY) or AI_BACKGROUND_DEFAULT_STRATEGY
+    ).strip().lower()
+    if strategy not in {"short", "long", "balanced"}:
+        strategy = AI_BACKGROUND_DEFAULT_STRATEGY
+
+    risk = str(data.get("ai_background_risk", AI_BACKGROUND_DEFAULT_RISK) or AI_BACKGROUND_DEFAULT_RISK).strip().lower()
+    if risk not in {"low", "medium", "high"}:
+        risk = AI_BACKGROUND_DEFAULT_RISK
+
+    try:
+        capital = int(data.get("ai_background_capital", AI_BACKGROUND_DEFAULT_CAPITAL))
+    except Exception:
+        capital = AI_BACKGROUND_DEFAULT_CAPITAL
+    capital = max(100, min(10_000_000, capital))
+
+    horizons_raw = data.get("outcome_horizons", OUTCOME_HORIZONS)
+    if isinstance(horizons_raw, (list, tuple)):
+        horizons_txt = ",".join(str(x) for x in horizons_raw)
+    else:
+        horizons_txt = str(horizons_raw or "")
+    outcome_horizons = _parse_outcome_horizons(horizons_txt)
+
+    try:
+        success_move_pct = float(data.get("outcome_success_move_pct", OUTCOME_SUCCESS_MOVE_PCT))
+    except Exception:
+        success_move_pct = OUTCOME_SUCCESS_MOVE_PCT
+    success_move_pct = max(0.1, min(25.0, success_move_pct))
+
+    outcome_preset_key = str(data.get("outcome_preset_key") or "").strip().lower()
+    if outcome_preset_key not in {"short", "mix", "swing"}:
+        if outcome_horizons == [3, 6, 12]:
+            outcome_preset_key = "short"
+        elif outcome_horizons == [24, 48, 72]:
+            outcome_preset_key = "swing"
+        else:
+            outcome_preset_key = "mix"
+
+    return {
+        "ai_background_interval_seconds": interval,
+        "ai_background_force_refresh": force_refresh,
+        "ai_background_strategy": strategy,
+        "ai_background_risk": risk,
+        "ai_background_capital": capital,
+        "outcome_horizons": outcome_horizons,
+        "outcome_success_move_pct": success_move_pct,
+        "outcome_preset_key": outcome_preset_key,
+    }
+
+
+def load_app_settings():
+    with APP_SETTINGS_LOCK:
+        try:
+            raw = open(APP_SETTINGS_FILE, encoding="utf-8").read().strip()
+            data = json.loads(raw) if raw else {}
+        except Exception:
+            data = {}
+    return _normalize_background_scheduler_settings(data)
+
+
+def save_app_settings(updates):
+    with APP_SETTINGS_LOCK:
+        current = {}
+        try:
+            raw = open(APP_SETTINGS_FILE, encoding="utf-8").read().strip()
+            current = json.loads(raw) if raw else {}
+        except Exception:
+            current = {}
+
+        if not isinstance(current, dict):
+            current = {}
+
+        if isinstance(updates, dict):
+            current.update(updates)
+
+        normalized = _normalize_background_scheduler_settings(current)
+
+        with open(APP_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=True, indent=2, sort_keys=True)
+
+    return normalized
+
+
+def build_free_api_scheduler_profile():
+    return {
+        "ai_background_interval_seconds": 5400,
+        "ai_background_force_refresh": False,
+        "ai_background_strategy": "short",
+        "ai_background_risk": "medium",
+        "ai_background_capital": 5000,
+    }
+
+
+def outcome_preset_horizons(preset_key):
+    key = str(preset_key or "").strip().lower()
+    if key == "short":
+        return [3, 6, 12]
+    if key == "swing":
+        return [24, 48, 72]
+    return [6, 24, 72]
+
+
+def get_runtime_outcome_config(app_settings=None):
+    cfg = app_settings if isinstance(app_settings, dict) else load_app_settings()
+
+    raw_horizons = cfg.get("outcome_horizons", OUTCOME_HORIZONS)
+    if isinstance(raw_horizons, (list, tuple)):
+        horizons_txt = ",".join(str(x) for x in raw_horizons)
+    else:
+        horizons_txt = str(raw_horizons or "")
+    horizons = _parse_outcome_horizons(horizons_txt)
+
+    try:
+        success_move_pct = float(cfg.get("outcome_success_move_pct", OUTCOME_SUCCESS_MOVE_PCT))
+    except Exception:
+        success_move_pct = OUTCOME_SUCCESS_MOVE_PCT
+    success_move_pct = max(0.1, min(25.0, success_move_pct))
+
+    preset_key = str(cfg.get("outcome_preset_key") or "").strip().lower()
+    if preset_key not in {"short", "mix", "swing"}:
+        if horizons == [3, 6, 12]:
+            preset_key = "short"
+        elif horizons == [24, 48, 72]:
+            preset_key = "swing"
+        else:
+            preset_key = "mix"
+
+    return {
+        "horizons": horizons,
+        "success_move_pct": success_move_pct,
+        "preset_key": preset_key,
+    }
+
+
+def build_api_budget_health(settings):
+    cfg = settings if isinstance(settings, dict) else {}
+    interval_seconds = max(60, int(cfg.get("ai_background_interval_seconds") or 1800))
+    runs_per_hour = 3600.0 / float(interval_seconds)
+
+    expected_scan_candidates = min(SCAN_CANDIDATE_LIMIT, MAX_DEEP_ANALYSIS_CANDIDATES)
+    expected_crypto_assets = min(AI_CRYPTO_LIMIT, COINGECKO_PAGES * 250)
+
+    # Approximation: one quote call per scanned stock symbol during a fresh run.
+    # History/news/fx calls are additional but generally lower than quote fan-out.
+    est_quote_calls_per_run = max(0, int(expected_scan_candidates))
+    est_quote_calls_per_hour = est_quote_calls_per_run * runs_per_hour
+
+    yahoo_hour_budget = float(YAHOO_LIMIT_PER_MIN) * 60.0
+    quote_pressure_pct = 0.0
+    if yahoo_hour_budget > 0:
+        quote_pressure_pct = min(999.0, (est_quote_calls_per_hour / yahoo_hour_budget) * 100.0)
+
+    if quote_pressure_pct >= 85:
+        risk_level = "high"
+        risk_text = "Hög risk för rate-limit med nuvarande intervall/scan-storlek."
+    elif quote_pressure_pct >= 55:
+        risk_level = "medium"
+        risk_text = "Medelrisk: fungerar ofta, men kan slå i tak vid toppar eller retries."
+    else:
+        risk_level = "low"
+        risk_text = "Låg risk: rimlig marginal mot gratis-API budget."
+
+    # Recommend a safer interval that aims for ~45% budget pressure with current scan size.
+    target_pressure = 45.0
+    recommended_interval_seconds = interval_seconds
+    if yahoo_hour_budget > 0 and est_quote_calls_per_run > 0:
+        recommended_runs_per_hour = (target_pressure / 100.0) * yahoo_hour_budget / float(est_quote_calls_per_run)
+        if recommended_runs_per_hour > 0:
+            raw_interval = int(round(3600.0 / recommended_runs_per_hour))
+            recommended_interval_seconds = max(60, min(86400, raw_interval))
+
+    if risk_level == "high":
+        recommendation_text = (
+            f"Öka intervall till minst cirka {recommended_interval_seconds}s "
+            "eller använd knappen 'Använd gratis-API profil'."
+        )
+    elif risk_level == "medium":
+        recommendation_text = (
+            f"Överväg intervall runt {recommended_interval_seconds}s för bättre buffert "
+            "mot rate-limit."
+        )
+    else:
+        recommendation_text = "Nuvarande inställning ser balanserad ut."
+
+    return {
+        "interval_seconds": interval_seconds,
+        "runs_per_hour": round(runs_per_hour, 2),
+        "expected_scan_candidates": expected_scan_candidates,
+        "expected_crypto_assets": expected_crypto_assets,
+        "est_quote_calls_per_run": est_quote_calls_per_run,
+        "est_quote_calls_per_hour": int(round(est_quote_calls_per_hour)),
+        "yahoo_limit_per_min": YAHOO_LIMIT_PER_MIN,
+        "yahoo_budget_per_hour": int(yahoo_hour_budget),
+        "quote_pressure_pct": round(quote_pressure_pct, 1),
+        "risk_level": risk_level,
+        "risk_text": risk_text,
+        "recommended_interval_seconds": recommended_interval_seconds,
+        "recommendation_text": recommendation_text,
+        "free_api_mode": FREE_API_MODE,
+    }
+
+
+def build_learning_storage_status():
+    using_db = db_enabled()
+    return {
+        "backend": "Postgres" if using_db else "File fallback",
+        "using_db": using_db,
+        "detail": "DATABASE_URL aktiv" if using_db else "DATABASE_URL saknas/otillganglig",
+    }
+
+
+def _append_jsonl(file_path, row):
+    table_name = LEARNING_DB_TABLE_BY_FILE.get(file_path)
+    if db_enabled() and table_name:
+        try:
+            payload_json = json.dumps(row, ensure_ascii=True)
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    if table_name == "ai_pending_outcomes":
+                        symbol = (row.get("symbol") or "").strip().upper()
+                        try:
+                            horizon_hours = int(row.get("horizon_hours") or OUTCOME_HORIZON_HOURS)
+                        except Exception:
+                            horizon_hours = OUTCOME_HORIZON_HOURS
+                        if symbol:
+                            cur.execute(
+                                """
+                                INSERT INTO ai_pending_outcomes (symbol, horizon_hours, payload, updated_at)
+                                VALUES (%s, %s, %s::jsonb, NOW())
+                                ON CONFLICT (symbol, horizon_hours) DO UPDATE
+                                SET payload = EXCLUDED.payload,
+                                    updated_at = NOW()
+                                """,
+                                (symbol, horizon_hours, payload_json),
+                            )
+                    else:
+                        cur.execute(
+                            f"INSERT INTO {table_name} (payload) VALUES (%s::jsonb)",
+                            (payload_json,),
+                        )
+                conn.commit()
+            return
+        except Exception as ex:
+            logger.warning("DB JSONL append failed for %s: %s", table_name, ex)
+
+    try:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=True) + "\n")
+    except Exception as ex:
+        logger.warning("JSONL append failed for %s: %s", file_path, ex)
+
+
+def _read_jsonl_tail(file_path, max_rows=500):
+    rows = []
+
+    table_name = LEARNING_DB_TABLE_BY_FILE.get(file_path)
+    if db_enabled() and table_name:
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    if table_name == "ai_pending_outcomes":
+                        cur.execute(
+                            """
+                            SELECT payload
+                            FROM ai_pending_outcomes
+                            ORDER BY updated_at DESC
+                            LIMIT %s
+                            """,
+                            (max(1, int(max_rows or 500)),),
+                        )
+                    else:
+                        cur.execute(
+                            f"SELECT payload FROM {table_name} ORDER BY id DESC LIMIT %s",
+                            (max(1, int(max_rows or 500)),),
+                        )
+                    db_rows = cur.fetchall()
+
+            for db_row in reversed(db_rows):
+                payload = db_row[0] if db_row else None
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except Exception:
+                        payload = None
+                if isinstance(payload, dict):
+                    rows.append(payload)
+            return rows
+        except Exception as ex:
+            logger.warning("DB JSONL read failed for %s: %s", table_name, ex)
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return rows
+
+    if max_rows > 0:
+        lines = lines[-max_rows:]
+
+    for line in lines:
+        raw = (line or "").strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _rewrite_jsonl_rows(file_path, rows):
+    table_name = LEARNING_DB_TABLE_BY_FILE.get(file_path)
+    if db_enabled() and table_name == "ai_pending_outcomes":
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM ai_pending_outcomes")
+                    for row in rows:
+                        symbol = (row.get("symbol") or "").strip().upper()
+                        try:
+                            horizon_hours = int(row.get("horizon_hours") or OUTCOME_HORIZON_HOURS)
+                        except Exception:
+                            horizon_hours = OUTCOME_HORIZON_HOURS
+                        if not symbol:
+                            continue
+                        cur.execute(
+                            """
+                            INSERT INTO ai_pending_outcomes (symbol, horizon_hours, payload, updated_at)
+                            VALUES (%s, %s, %s::jsonb, NOW())
+                            """,
+                            (symbol, horizon_hours, json.dumps(row, ensure_ascii=True)),
+                        )
+                conn.commit()
+            return
+        except Exception as ex:
+            logger.warning("DB JSONL rewrite failed for %s: %s", table_name, ex)
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=True) + "\n")
+    except Exception as ex:
+        logger.warning("JSONL rewrite failed for %s: %s", file_path, ex)
+
+
+def _rotation_window(symbols, window_size, cycle_index):
+    if not symbols:
+        return []
+    size = max(1, min(len(symbols), int(window_size)))
+    start = (int(cycle_index) * size) % len(symbols)
+    block = symbols[start:start + size]
+    if len(block) < size:
+        block += symbols[: size - len(block)]
+    return block
+
+
+def select_news_trigger_symbols(symbols):
+    scored = []
+    probe = list(symbols or [])[:HYBRID_NEWS_TRIGGER_SAMPLE_SIZE]
+    for sym in probe:
+        score = get_news_score(sym, allow_network=True)
+        if score > 0:
+            scored.append((sym, float(score)))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [sym for sym, _ in scored[:HYBRID_NEWS_TRIGGER_MAX_SYMBOLS]]
+
+
+def build_hybrid_scan_plan(pool_symbols, previous_ranked=None):
+    pool = []
+    seen = set()
+    for sym in pool_symbols or []:
+        key = (sym or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        pool.append(key)
+
+    if not pool:
+        return {
+            "symbols": [],
+            "core_symbols": set(),
+            "rotation_symbols": set(),
+            "news_trigger_symbols": set(),
+            "core_count": 0,
+            "rotation_count": 0,
+            "news_trigger_count": 0,
+        }
+
+    previous = []
+    prev_seen = set()
+    for row in previous_ranked or []:
+        key = (row.get("t") or "").strip().upper()
+        if not key or key in prev_seen or key not in seen:
+            continue
+        prev_seen.add(key)
+        previous.append(key)
+
+    core = previous[:HYBRID_SCAN_CORE_SIZE]
+    core_set = set(core)
+    if len(core) < HYBRID_SCAN_CORE_SIZE:
+        for sym in pool:
+            if sym in core_set:
+                continue
+            core.append(sym)
+            core_set.add(sym)
+            if len(core) >= HYBRID_SCAN_CORE_SIZE:
+                break
+
+    remaining = [sym for sym in pool if sym not in core_set]
+    cycle_index = int(time.time() // max(1, AI_BACKGROUND_SCAN_INTERVAL_SECONDS))
+    rotation = _rotation_window(remaining, HYBRID_SCAN_ROTATION_WINDOW, cycle_index)
+    rotation_set = set(rotation)
+
+    news_probe_pool = [sym for sym in rotation if sym not in core_set]
+    news_trigger = select_news_trigger_symbols(news_probe_pool)
+    news_set = set(news_trigger)
+
+    merged = []
+    merged_seen = set()
+    for group in (core, rotation, news_trigger):
+        for sym in group:
+            if sym in merged_seen:
+                continue
+            merged_seen.add(sym)
+            merged.append(sym)
+
+    merged = merged[:SCAN_CANDIDATE_LIMIT]
+
+    return {
+        "symbols": merged,
+        "core_symbols": core_set,
+        "rotation_symbols": rotation_set,
+        "news_trigger_symbols": news_set,
+        "core_count": len(core),
+        "rotation_count": len(rotation),
+        "news_trigger_count": len(news_trigger),
+    }
+
+
+def evaluate_pending_outcomes():
+    now = time.time()
+    outcome_cfg = get_runtime_outcome_config()
+    success_move_pct = float(outcome_cfg.get("success_move_pct", OUTCOME_SUCCESS_MOVE_PCT))
+    rows = _read_jsonl_tail(AI_PENDING_OUTCOMES_FILE, max_rows=5000)
+    if not rows:
+        return
+
+    keep = []
+    resolved_any = False
+
+    for row in rows:
+        eval_at = float(row.get("eval_at") or 0)
+        symbol = (row.get("symbol") or "").strip().upper()
+        entry_price = float(row.get("entry_price") or 0)
+
+        if not symbol or entry_price <= 0:
+            continue
+        if now < eval_at:
+            keep.append(row)
+            continue
+
+        price_data = get_price(symbol, allow_finnhub=False)
+        if isinstance(price_data, dict):
+            exit_price = float(price_data.get("price") or 0)
+        else:
+            exit_price = float(price_data or 0)
+
+        if exit_price <= 0:
+            retry_count = int(row.get("retry_count") or 0) + 1
+            if retry_count <= 5:
+                row["retry_count"] = retry_count
+                row["eval_at"] = now + 1800
+                keep.append(row)
+            continue
+
+        move_pct = ((exit_price - entry_price) / entry_price) * 100.0
+        success = move_pct >= success_move_pct
+        record = dict(row)
+        record.update(
+            {
+                "resolved_at": int(now),
+                "exit_price": round(exit_price, 6),
+                "move_pct": round(move_pct, 3),
+                "success": bool(success),
+            }
+        )
+        _append_jsonl(AI_OUTCOMES_LOG_FILE, record)
+        resolved_any = True
+
+    if resolved_any or len(keep) != len(rows):
+        _rewrite_jsonl_rows(AI_PENDING_OUTCOMES_FILE, keep)
+
+
+def compute_learning_multipliers():
+    rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+    if len(rows) < LEARNING_MIN_OUTCOMES:
+        return {
+            "news_mult": 1.0,
+            "rotation_mult": 1.0,
+            "sample_size": len(rows),
+        }
+
+    overall = sum(1 for r in rows if r.get("success")) / float(len(rows))
+
+    news_rows = [r for r in rows if r.get("news_trigger") is True]
+    rotation_rows = [r for r in rows if r.get("rotation_candidate") is True]
+
+    news_mult = 1.0
+    rotation_mult = 1.0
+
+    if len(news_rows) >= max(10, LEARNING_MIN_OUTCOMES // 3):
+        news_rate = sum(1 for r in news_rows if r.get("success")) / float(len(news_rows))
+        news_mult = max(0.7, min(1.4, 1.0 + ((news_rate - overall) * 1.2)))
+
+    if len(rotation_rows) >= max(10, LEARNING_MIN_OUTCOMES // 3):
+        rot_rate = sum(1 for r in rotation_rows if r.get("success")) / float(len(rotation_rows))
+        rotation_mult = max(0.75, min(1.35, 1.0 + ((rot_rate - overall) * 1.0)))
+
+    return {
+        "news_mult": round(news_mult, 3),
+        "rotation_mult": round(rotation_mult, 3),
+        "sample_size": len(rows),
+    }
+
+
+def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at):
+    if not result_rows:
+        return
+
+    outcome_cfg = get_runtime_outcome_config()
+    runtime_horizons = outcome_cfg.get("horizons", OUTCOME_HORIZONS)
+
+    existing = _read_jsonl_tail(AI_PENDING_OUTCOMES_FILE, max_rows=5000)
+    pending_map = {}
+    for row in existing:
+        sym = (row.get("symbol") or "").strip().upper()
+        horizon = int(row.get("horizon_hours") or OUTCOME_HORIZON_HOURS)
+        if sym:
+            pending_map[(sym, horizon)] = row
+
+    core_set = scan_plan.get("core_symbols", set())
+    rotation_set = scan_plan.get("rotation_symbols", set())
+    news_set = scan_plan.get("news_trigger_symbols", set())
+
+    for row in result_rows[:OUTCOME_TRACK_TOP_N]:
+        sym = (row.get("t") or "").strip().upper()
+        price = float(row.get("price") or 0)
+        signal = row.get("signal") or "AVVAKTA"
+        if not sym or price <= 0 or signal not in {"KÖP", "AVVAKTA KÖP"}:
+            continue
+
+        for horizon_hours in runtime_horizons:
+            eval_at = int(scan_started_at + (int(horizon_hours) * 3600))
+            pending_map[(sym, int(horizon_hours))] = {
+                "symbol": sym,
+                "scan_ts": int(scan_started_at),
+                "eval_at": eval_at,
+                "horizon_hours": int(horizon_hours),
+                "entry_price": round(price, 6),
+                "score": int(row.get("score") or 0),
+                "signal": signal,
+                "news_trigger": sym in news_set,
+                "rotation_candidate": sym in rotation_set and sym not in core_set,
+            }
+
+    _rewrite_jsonl_rows(AI_PENDING_OUTCOMES_FILE, list(pending_map.values()))
+
+
+def build_learning_status():
+    outcome_cfg = get_runtime_outcome_config()
+    rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+    multipliers = compute_learning_multipliers()
+
+    if not rows:
+        return {
+            "has_data": False,
+            "total_outcomes": 0,
+            "success_rate_pct": 0.0,
+            "avg_move_pct": 0.0,
+            "latest_resolved": "-",
+            "learning_news_mult": multipliers.get("news_mult", 1.0),
+            "learning_rotation_mult": multipliers.get("rotation_mult", 1.0),
+            "sample_size": multipliers.get("sample_size", 0),
+            "horizon_rows": [],
+            "active_horizons": outcome_cfg.get("horizons", OUTCOME_HORIZONS),
+            "success_move_pct": float(outcome_cfg.get("success_move_pct", OUTCOME_SUCCESS_MOVE_PCT)),
+        }
+
+    total = len(rows)
+    success_rate = (sum(1 for r in rows if r.get("success")) / float(total)) * 100.0
+    avg_move = sum(float(r.get("move_pct") or 0) for r in rows) / float(total)
+    latest_resolved_ts = max(int(r.get("resolved_at") or 0) for r in rows)
+    latest_resolved_txt = datetime.utcfromtimestamp(latest_resolved_ts).strftime("%Y-%m-%d %H:%M UTC") if latest_resolved_ts else "-"
+
+    horizon_buckets = {}
+    for r in rows:
+        h = int(r.get("horizon_hours") or OUTCOME_HORIZON_HOURS)
+        bucket = horizon_buckets.setdefault(h, {"total": 0, "wins": 0})
+        bucket["total"] += 1
+        if r.get("success"):
+            bucket["wins"] += 1
+
+    horizon_rows = []
+    for h in sorted(horizon_buckets.keys()):
+        b = horizon_buckets[h]
+        win_pct = (float(b["wins"]) / float(b["total"])) * 100.0 if b["total"] else 0.0
+        horizon_rows.append(
+            {
+                "horizon_hours": h,
+                "total": int(b["total"]),
+                "win_rate_pct": round(win_pct, 1),
+            }
+        )
+
+    return {
+        "has_data": True,
+        "total_outcomes": total,
+        "success_rate_pct": round(success_rate, 1),
+        "avg_move_pct": round(avg_move, 2),
+        "latest_resolved": latest_resolved_txt,
+        "learning_news_mult": multipliers.get("news_mult", 1.0),
+        "learning_rotation_mult": multipliers.get("rotation_mult", 1.0),
+        "sample_size": multipliers.get("sample_size", 0),
+        "horizon_rows": horizon_rows,
+        "active_horizons": outcome_cfg.get("horizons", OUTCOME_HORIZONS),
+        "success_move_pct": float(outcome_cfg.get("success_move_pct", OUTCOME_SUCCESS_MOVE_PCT)),
+    }
+
+
+def build_learning_progress_indicator():
+    rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
+    rows = [r for r in rows if isinstance(r.get("success"), bool)]
+
+    total = len(rows)
+    target = max(LEARNING_MIN_OUTCOMES * 4, 120)
+    sample_progress = min(100, int(round((total / float(target)) * 100))) if target > 0 else 0
+
+    if total >= 30:
+        tail = rows[-min(60, total):]
+        success_vals = [1.0 if r.get("success") else 0.0 for r in tail]
+        mean_success = sum(success_vals) / float(len(success_vals))
+        variance = sum((x - mean_success) ** 2 for x in success_vals) / float(len(success_vals))
+        # Convert to 0-100 where lower variance means more stable learning signal.
+        stability = int(round(max(0.0, min(1.0, 1.0 - (variance * 4.0))) * 100))
+    else:
+        stability = 0
+
+    maturity_score = int(round((sample_progress * 0.7) + (stability * 0.3)))
+
+    if maturity_score >= 80:
+        stage = "Mogen"
+        stage_text = "AI har tillräckligt med utfallsdata för mer stabil rankingjustering."
+    elif maturity_score >= 50:
+        stage = "Bygger"
+        stage_text = "AI lär sig aktivt. Träffsäkerheten förbättras när fler utfall kommer in."
+    else:
+        stage = "Tidigt"
+        stage_text = "AI är i uppstartsfas och behöver mer utfallsdata för stabil adaptation."
+
+    return {
+        "maturity_score": maturity_score,
+        "sample_progress": sample_progress,
+        "stability": stability,
+        "stage": stage,
+        "stage_text": stage_text,
+        "total_outcomes": total,
+        "target_outcomes": target,
+    }
+
+
+def log_scan_trace(scan_started_at, scan_plan, learning_multipliers, result_rows):
+    outcome_cfg = get_runtime_outcome_config()
+    payload = {
+        "ts": int(scan_started_at),
+        "scan_symbols": len(scan_plan.get("symbols", [])),
+        "core_count": int(scan_plan.get("core_count") or 0),
+        "rotation_count": int(scan_plan.get("rotation_count") or 0),
+        "news_trigger_count": int(scan_plan.get("news_trigger_count") or 0),
+        "learning_news_mult": float(learning_multipliers.get("news_mult", 1.0)),
+        "learning_rotation_mult": float(learning_multipliers.get("rotation_mult", 1.0)),
+        "learning_sample_size": int(learning_multipliers.get("sample_size", 0)),
+        "outcome_horizons": list(outcome_cfg.get("horizons", OUTCOME_HORIZONS)),
+        "top_symbols": [r.get("t") for r in (result_rows or [])[:10] if r.get("t")],
+    }
+    _append_jsonl(AI_SCAN_TRACE_FILE, payload)
 
 
 def load_user_settings(email):
@@ -1526,6 +2372,10 @@ ai_background_state = {
 }
 AI_BACKGROUND_COOLDOWN = 30
 AI_BACKGROUND_LOCK = threading.Lock()
+AI_REFRESH_THREAD_LOCK = threading.Lock()
+AI_REFRESH_THREAD_STATE = {
+    "started": False,
+}
 
 alert_cache = {}
 
@@ -1555,6 +2405,45 @@ def ensure_ai_background_loading(strategy="short", risk="medium", capital=10000)
                 ai_background_state["running"] = False
 
     threading.Thread(target=_worker, daemon=True).start()
+    return True
+
+
+def start_periodic_ai_refresh_thread():
+    """Start one periodic AI refresh loop per worker process when enabled."""
+    if not ENABLE_BACKGROUND:
+        return False
+
+    with AI_REFRESH_THREAD_LOCK:
+        if AI_REFRESH_THREAD_STATE.get("started"):
+            return False
+        AI_REFRESH_THREAD_STATE["started"] = True
+
+    def _loop():
+        runtime_cfg = load_app_settings()
+        logger.info(
+            "Background AI refresher started | interval=%ss force_refresh=%s strategy=%s risk=%s",
+            runtime_cfg["ai_background_interval_seconds"],
+            runtime_cfg["ai_background_force_refresh"],
+            runtime_cfg["ai_background_strategy"],
+            runtime_cfg["ai_background_risk"],
+        )
+        while True:
+            runtime_cfg = load_app_settings()
+            try:
+                safe_fetch(
+                    lambda: run_daily_ai(
+                        runtime_cfg["ai_background_strategy"],
+                        runtime_cfg["ai_background_risk"],
+                        runtime_cfg["ai_background_capital"],
+                        force_refresh=runtime_cfg["ai_background_force_refresh"],
+                    )
+                )
+            except Exception as ex:
+                logger.warning("Background AI refresher loop failed: %s", ex)
+
+            time.sleep(runtime_cfg["ai_background_interval_seconds"])
+
+    threading.Thread(target=_loop, daemon=True).start()
     return True
 
 # ===== MARKET =====
@@ -2938,23 +3827,31 @@ def build_fx_info(fx_rates):
     }
 
 # ===== AI DAILY SCAN =====
-def run_daily_ai(strategy="short", risk="medium", capital=10000):
+def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=False):
 
     now = time.time()
 
     # ✅ cache
-    if ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
+    if (not force_refresh) and ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
         return ai_cache["data"]
 
     print("🔄 Running AI daily scan...")
 
     result = []
-  
-    symbols = market_scanner()
+
+    with AI_LEARNING_LOCK:
+        evaluate_pending_outcomes()
+        learning_multipliers = compute_learning_multipliers()
+
+    symbol_pool = market_scanner()
+    previous_ranked = ai_results_cache.get("data") or ai_cache.get("data") or []
+    scan_plan = build_hybrid_scan_plan(symbol_pool, previous_ranked=previous_ranked)
+    symbols = scan_plan.get("symbols", [])
+
     stock_assets = get_stock_assets(symbols, use_finnhub=False, include_display_name=False)
 
     # If Yahoo path is temporarily unavailable, do a controlled Finnhub rescue pass.
-    min_stock_target = max(24, min(80, int(len(symbols) * 0.25)))
+    min_stock_target = max(20, min(70, int(len(symbols) * 0.22)))
     if len(stock_assets) < min_stock_target:
         stock_seen = {a.get("t") for a in stock_assets}
         rescue_symbols = [sym for sym in symbols if sym not in stock_seen]
@@ -3055,6 +3952,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
             ma_weight = 4
             news_weight = 3
 
+        news_mult = float(learning_multipliers.get("news_mult", 1.0))
+        rotation_mult = float(learning_multipliers.get("rotation_mult", 1.0))
+
         # ✅ base score
         base = 80 if sig_base == "KÖP" else 60 if sig_base == "AVVAKTA KÖP" else 30
 
@@ -3062,10 +3962,25 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
             base
             + (trend_score * trend_weight)
             + (rsi_score * rsi_weight)
-            + (news_score * news_weight)
+            + (news_score * news_weight * news_mult)
             + (ma_score * ma_weight)
 
         )
+
+        symbol_key = (s.get("t") or "").strip().upper()
+        core_set = scan_plan.get("core_symbols", set())
+        rotation_set = scan_plan.get("rotation_symbols", set())
+        news_set = scan_plan.get("news_trigger_symbols", set())
+        novelty_base = 0.0
+        if symbol_key in news_set:
+            novelty_base += HYBRID_NEWS_BONUS
+        elif symbol_key in rotation_set and symbol_key not in core_set:
+            novelty_base += HYBRID_ROTATION_BONUS * rotation_mult
+
+        miss_count = int(NOVELTY_MISS_COUNTER.get(symbol_key, 0))
+        novelty_bonus = max(0.0, novelty_base - (miss_count * HYBRID_NOVELTY_DECAY_PER_MISS))
+        if novelty_bonus > 0:
+            total_score += novelty_bonus
 
         if s.get("type") == "stock":
             total_score += 5
@@ -3124,8 +4039,15 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
 
         s["score"] = max(0, min(100, int(total_score)))
         s["signal"] = get_signal(price, s["score"])
+        s["novelty_bonus"] = round(novelty_bonus, 2)
         s["reason"] = get_reason(s["signal"], price, s["t"], s)
         s["summary"] = get_summary(s)
+
+        if novelty_base > 0:
+            if s["signal"] == "KÖP" or s["score"] >= 75:
+                NOVELTY_MISS_COUNTER[symbol_key] = 0
+            else:
+                NOVELTY_MISS_COUNTER[symbol_key] = min(8, miss_count + 1)
 
         # ✅ AI confidence (0–100%)
         s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
@@ -3182,11 +4104,25 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000):
         signal_counts.get("SÄLJ", 0),
         len(result),
     )
+    logger.info(
+        "Hybrid scan mix | scanned=%s core=%s rotation=%s news_trigger=%s | learning news_mult=%s rotation_mult=%s sample=%s",
+        len(scan_plan.get("symbols", [])),
+        scan_plan.get("core_count", 0),
+        scan_plan.get("rotation_count", 0),
+        scan_plan.get("news_trigger_count", 0),
+        learning_multipliers.get("news_mult", 1.0),
+        learning_multipliers.get("rotation_mult", 1.0),
+        learning_multipliers.get("sample_size", 0),
+    )
 
     print("---- DEBUG TOP ASSETS ----")
     for s in result[:15]:
         print(s["t"], "| price:", s.get("price"), "| score:", s.get("score"), "| signal:", s.get("signal"))
     print("--------------------------")
+
+    with AI_LEARNING_LOCK:
+        register_scan_outcome_candidates(result, scan_plan, now)
+        log_scan_trace(now, scan_plan, learning_multipliers, result)
 
     # ✅ cache
     ai_cache["data"] = result
@@ -6366,6 +7302,8 @@ def dashboard():
         return redirect("/login")
 
     is_admin = is_admin_email(user)
+    app_settings = load_app_settings()
+    outcome_cfg = get_runtime_outcome_config(app_settings)
     user_platforms = get_user_trading_platforms(user)
     platform_links = build_platform_links(user_platforms)
     platform_names = build_platform_names_for_header(user_platforms)
@@ -6411,6 +7349,76 @@ def dashboard():
     session["mintrend_currency"] = mintrend_currency
 
     if request.method == "POST" and is_admin:
+        if "admin_apply_outcome_preset" in request.form:
+            preset_key = (request.form.get("outcome_preset") or "mix").strip().lower()
+            preset_horizons = outcome_preset_horizons(preset_key)
+            app_settings = save_app_settings(
+                {
+                    "outcome_preset_key": preset_key,
+                    "outcome_horizons": preset_horizons,
+                }
+            )
+            outcome_cfg = get_runtime_outcome_config(app_settings)
+            session["users_msg"] = (
+                "✅ Outcome Horizons uppdaterad: "
+                f"preset={outcome_cfg['preset_key']} | horisonter={','.join(str(h) for h in outcome_cfg['horizons'])}h"
+            )
+            return redirect("/dashboard?tab=users")
+
+        if "admin_apply_free_api_profile" in request.form:
+            app_settings = save_app_settings(build_free_api_scheduler_profile())
+            outcome_cfg = get_runtime_outcome_config(app_settings)
+            session["users_msg"] = (
+                "✅ Gratis-API profil aktiverad: "
+                f"{app_settings['ai_background_interval_seconds']}s, "
+                f"force_refresh={app_settings['ai_background_force_refresh']}, "
+                f"strategi={app_settings['ai_background_strategy']}, risk={app_settings['ai_background_risk']}"
+            )
+            return redirect("/dashboard?tab=users")
+
+        if "admin_save_ai_background" in request.form:
+            interval_raw = (request.form.get("ai_background_interval_seconds") or "").strip()
+            capital_raw = (request.form.get("ai_background_capital") or "").strip()
+
+            try:
+                interval_value = int(interval_raw)
+            except Exception:
+                interval_value = app_settings.get("ai_background_interval_seconds", AI_BACKGROUND_SCAN_INTERVAL_SECONDS)
+
+            try:
+                capital_value = int(capital_raw)
+            except Exception:
+                capital_value = app_settings.get("ai_background_capital", AI_BACKGROUND_DEFAULT_CAPITAL)
+
+            strategy_value = (request.form.get("ai_background_strategy") or "").strip().lower()
+            if strategy_value not in {"short", "long", "balanced"}:
+                strategy_value = app_settings.get("ai_background_strategy", AI_BACKGROUND_DEFAULT_STRATEGY)
+
+            risk_value = (request.form.get("ai_background_risk") or "").strip().lower()
+            if risk_value not in {"low", "medium", "high"}:
+                risk_value = app_settings.get("ai_background_risk", AI_BACKGROUND_DEFAULT_RISK)
+
+            force_refresh_value = request.form.get("ai_background_force_refresh") == "on"
+
+            app_settings = save_app_settings(
+                {
+                    "ai_background_interval_seconds": interval_value,
+                    "ai_background_force_refresh": force_refresh_value,
+                    "ai_background_strategy": strategy_value,
+                    "ai_background_risk": risk_value,
+                    "ai_background_capital": capital_value,
+                }
+            )
+            outcome_cfg = get_runtime_outcome_config(app_settings)
+
+            session["users_msg"] = (
+                "✅ AI bakgrundsscan uppdaterad: "
+                f"{app_settings['ai_background_interval_seconds']}s, "
+                f"force_refresh={app_settings['ai_background_force_refresh']}, "
+                f"strategi={app_settings['ai_background_strategy']}, risk={app_settings['ai_background_risk']}"
+            )
+            return redirect("/dashboard?tab=users")
+
         if "admin_add_user" in request.form:
             target = (request.form.get("admin_add_user") or request.form.get("admin_new_user_email") or "").strip().lower()
             if not target or "@" not in target:
@@ -6690,7 +7698,7 @@ def dashboard():
     ]
     stock_buy_candidates = dedupe_by_symbol(stock_buy_candidates)
 
-    def _fill_recommendations(primary_candidates, full_candidates, limit, backup_candidates=None):
+    def _fill_recommendations(primary_candidates, full_candidates, limit, backup_candidates=None, ranked_pool=None):
         selected = list(primary_candidates[:limit])
         if len(selected) >= limit:
             return selected
@@ -6716,6 +7724,24 @@ def dashboard():
         ]
         backup = sorted(backup, key=lambda x: float(x.get("score", 0) or 0), reverse=True)
         for cand in backup:
+            selected.append(cand)
+            selected_symbols.add(cand.get("t"))
+            if len(selected) >= limit:
+                return selected
+
+        # Final fallback: take highest-ranked symbols from full ranked pool (excluding duplicates)
+        # so UI can still return close to requested top_n even during sparse signal periods.
+        ranked_pool = ranked_pool or []
+        broad_backup = [
+            x for x in ranked_pool
+            if x.get("t") not in selected_symbols and x.get("signal") in {"KÖP", "AVVAKTA KÖP", "AVVAKTA"}
+        ]
+        broad_backup = sorted(
+            broad_backup,
+            key=lambda x: (float(x.get("score", 0) or 0), float(x.get("trigger_score", 0) or 0)),
+            reverse=True,
+        )
+        for cand in broad_backup:
             selected.append(cand)
             selected_symbols.add(cand.get("t"))
             if len(selected) >= limit:
@@ -6748,12 +7774,14 @@ def dashboard():
         stock_candidates,
         top_n,
         backup_candidates=stock_candidates_with_owned,
+        ranked_pool=[x for x in ranked_for_recommendations if x.get("type") != "crypto"],
     )
     crypto_display_candidates = _fill_recommendations(
         crypto_buy_candidates,
         crypto_candidates,
         top_n,
         backup_candidates=crypto_candidates_with_owned,
+        ranked_pool=[x for x in ranked_for_recommendations if x.get("type") == "crypto"],
     )
 
     # ✅ PRIORITY
@@ -6897,6 +7925,10 @@ def dashboard():
 
     # Passa listor till mallen så Jinja kan iterera över dem
     users_msg = session.pop("users_msg", "")
+    api_budget_health = build_api_budget_health(app_settings)
+    learning_status = build_learning_status()
+    learning_progress = build_learning_progress_indicator()
+    learning_storage_status = build_learning_storage_status()
     registered_users = load_registered_users() if is_admin else []
     regular_users = []
     admin_users = []
@@ -6977,6 +8009,16 @@ def dashboard():
         mintrend_range_options=MIN_TREND_RANGE_OPTIONS,
         mintrend_summary_display=mintrend_summary_display,
         mintrend_fx_info=mintrend_fx_info,
+        ai_background_settings=app_settings,
+        api_budget_health=api_budget_health,
+        learning_status=learning_status,
+        learning_progress=learning_progress,
+        learning_storage_status=learning_storage_status,
+        background_enabled=ENABLE_BACKGROUND,
+        free_api_mode=FREE_API_MODE,
+        outcome_horizons=outcome_cfg["horizons"],
+        outcome_success_move_pct=outcome_cfg["success_move_pct"],
+        outcome_preset_key=outcome_cfg["preset_key"],
     )
 
 
@@ -6987,6 +8029,12 @@ def portfolio_page():
         return redirect("/login")
 
     is_admin = is_admin_email(user)
+    app_settings = load_app_settings()
+    outcome_cfg = get_runtime_outcome_config(app_settings)
+    api_budget_health = build_api_budget_health(app_settings)
+    learning_status = build_learning_status()
+    learning_progress = build_learning_progress_indicator()
+    learning_storage_status = build_learning_storage_status()
     user_platforms = get_user_trading_platforms(user)
     platform_links = build_platform_links(user_platforms)
     platform_names = build_platform_names_for_header(user_platforms)
@@ -7216,6 +8264,16 @@ def portfolio_page():
         mintrend_range_options=MIN_TREND_RANGE_OPTIONS,
         mintrend_summary_display=mintrend_summary_display,
         mintrend_fx_info=mintrend_fx_info,
+        ai_background_settings=app_settings,
+        api_budget_health=api_budget_health,
+        learning_status=learning_status,
+        learning_progress=learning_progress,
+        learning_storage_status=learning_storage_status,
+        background_enabled=ENABLE_BACKGROUND,
+        free_api_mode=FREE_API_MODE,
+        outcome_horizons=outcome_cfg["horizons"],
+        outcome_success_move_pct=outcome_cfg["success_move_pct"],
+        outcome_preset_key=outcome_cfg["preset_key"],
         # ge tomma listor för att undvika Jinja-fel om sidan renderas utan AI-data
         stocks=[],
         crypto=[],
@@ -7348,6 +8406,10 @@ def analysis_search():
 
 # ===== HOME =====
 
+@app.before_request
+def _start_background_ai_once_per_worker():
+    start_periodic_ai_refresh_thread()
+
 @app.route("/")
 def home():
     return redirect("/login")
@@ -7356,14 +8418,8 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
 
-    # ✅ Auto refresh AI (AVSTÄNGD för debugging)
-    def auto_refresh_ai():
-        while True:
-            print("🔄 Auto-refresh AI")
-            safe_fetch(lambda: run_daily_ai("short", "medium", 10000))
-            time.sleep(1800)
-
-    threading.Thread(target=auto_refresh_ai, daemon=True).start()
+    # Start periodic AI refresher if enabled via environment.
+    start_periodic_ai_refresh_thread()
 
     # ✅ Preload AI
     def preload_ai():
