@@ -4785,6 +4785,19 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         if capital > 30000 and price < 10:
             total_score -= 3
 
+        # Extra affordability guardrail: if capital cannot buy at least one unit,
+        # strongly deprioritize the symbol. Keep moderate penalties for low unit count.
+        if capital > 0 and price > 0:
+            affordable_units = float(capital) / float(price)
+            if affordable_units < 1.0:
+                total_score -= 10
+            elif affordable_units < 2.0:
+                total_score -= 5
+            elif affordable_units < 3.0:
+                total_score -= 2
+            elif 4.0 <= affordable_units <= 20.0:
+                total_score += 1
+
         # ✅ FILTER beroende på strategi
 
         if strategy == "short":
@@ -4890,16 +4903,12 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
 
     result = sorted(
         result,
-        key=lambda x: (x.get("trigger_score", 0), x.get("score", 0)),
+        key=lambda x: (x.get("score", 0), x.get("trigger_score", 0), x.get("confidence", 0)),
         reverse=True
     )
 
-    stock_results = [x for x in result if x.get("type") == "stock"]
-
-    if len(stock_results) > 0:
-        prioritized = stock_results[:10] + result
-    else:
-        prioritized = result
+    # Keep ranking pure: highest score (already capital/risk adjusted) should stay at the top.
+    prioritized = result
 
     # Remove duplicates so top list can contain more unique opportunities.
     seen_symbols = set()
@@ -4930,7 +4939,11 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
                     item["score"] = max(0, int(item.get("score", 0)) - 2)
                 else:
                     item["diversification_penalty"] = 0
-            result = sorted(result, key=lambda x: (x.get("trigger_score", 0), x.get("score", 0)), reverse=True)
+            result = sorted(
+                result,
+                key=lambda x: (x.get("score", 0), x.get("trigger_score", 0), x.get("confidence", 0)),
+                reverse=True,
+            )
 
     signal_counts = {"KÖP": 0, "AVVAKTA KÖP": 0, "AVVAKTA": 0, "SÄLJ": 0}
     for item in result:

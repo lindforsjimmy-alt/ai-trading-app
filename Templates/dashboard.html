@@ -1819,7 +1819,7 @@
                 <div class="asset-box">
 
                     <b>{{ s.display_name or s.t }}</b><br>
-                    Pris: {{ '%.2f' % s.price }} USD<br>
+                    Pris: {{ '%.2f' % s.price }} USD ({{ '%.2f' % (s.price * usd_sek) }} SEK)<br>
 
                     Score: {{ s.score }}<br>
                     {% if s.signal=='KÖP' %}
@@ -1890,7 +1890,8 @@
 
                     <b>{{ s.display_name or s.t }}</b><br>
 
-                    Pris: {% if s.price is defined %}{{ '%.2f' % s.price }} USD{% else %}-{% endif %}<br>
+                    Pris: {% if s.price is defined %}{{ '%.2f' % s.price }} USD ({{ '%.2f' % (s.price * usd_sek) }}
+                    SEK){% else %}-{% endif %}<br>
 
                     Score: {% if s.score is defined %}{{ s.score }}{% else %}-{% endif %}<br>
                     {% if s.signal is defined and s.signal=='KÖP' %}
