@@ -2605,25 +2605,6 @@
                 <label>
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
                         <span>Intervall (sekunder):</span>
-                        <button type="button" onclick="togglePopup(this)"
-                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
-                        <div class="ai-popup" role="dialog" aria-label="Info om full scan">
-                            <button type="button" onclick="closePopup(this)">Stäng</button>
-                            <div>
-                                <strong>Tvinga ny full scan varje körning</strong><br><br>
-                                När checkboxen är <strong>på</strong> ignorerar systemet mer cache/spår och kör en ny
-                                bred scan vid varje intervall.<br><br>
-                                <strong>Det innebär:</strong><br>
-                                - Färskare kandidater och snabbare reaktion på marknadsskiften.<br>
-                                - Högre API-belastning och större risk för rate-limit på gratisnivå.<br>
-                                - Ofta mer variation i rekommendationer mellan körningar.<br><br>
-                                När checkboxen är <strong>av</strong> återanvänds mer tidigare resultat/cache, vilket
-                                ger lägre API-tryck och ofta stabilare kandidater.<br><br>
-                                <strong>Praktiskt:</strong><br>
-                                - Gratis-API: låt den oftast vara av, och använd längre intervall.<br>
-                                - Aktiv marknad/nyheter: slå på tillfälligt för snabbare omtag.
-                            </div>
-                        </div>
                     </div>
                     <input type="number" min="60" max="86400" step="60" name="ai_background_interval_seconds"
                         value="{{ ai_background_settings.ai_background_interval_seconds }}">
@@ -2659,10 +2640,31 @@
                         value="{{ ai_background_settings.ai_background_capital }}">
                 </label>
 
-                <label style="display:flex; align-items:center; gap:8px;">
+                <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(56, 189, 248, 0.2); border:1px solid rgba(56, 189, 248, 0.36);">i</button>
+                        <span>Tvinga ny full scan varje körning</span>
+                        <div class="ai-popup" role="dialog" aria-label="Info om full scan">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Tvinga ny full scan varje körning</strong><br><br>
+                                När checkboxen är <strong>på</strong> ignorerar systemet mer cache/spår och kör en ny
+                                bred scan vid varje intervall.<br><br>
+                                <strong>Det innebär:</strong><br>
+                                - Färskare kandidater och snabbare reaktion på marknadsskiften.<br>
+                                - Högre API-belastning och större risk för rate-limit på gratisnivå.<br>
+                                - Ofta mer variation i rekommendationer mellan körningar.<br><br>
+                                När checkboxen är <strong>av</strong> återanvänds mer tidigare resultat/cache, vilket
+                                ger lägre API-tryck och ofta stabilare kandidater.<br><br>
+                                <strong>Praktiskt:</strong><br>
+                                - Gratis-API: låt den oftast vara av, och använd längre intervall.<br>
+                                - Aktiv marknad/nyheter: slå på tillfälligt för snabbare omtag.
+                            </div>
+                        </div>
+                    </div>
                     <input type="checkbox" name="ai_background_force_refresh" {% if
                         ai_background_settings.ai_background_force_refresh %}checked{% endif %}>
-                    Tvinga ny full scan varje körning
                 </label>
 
                 <div>
