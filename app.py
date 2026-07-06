@@ -2715,10 +2715,12 @@ def get_asset_display_name(symbol):
         trim_dict_cache(COMPANY_NAME_CACHE, MAX_COMPANY_CACHE_ITEMS)
         return None
 
-    if symbol.upper() in company_name:
-        display_name = company_name
-    else:
-        display_name = f"{company_name} ({symbol})"
+    symbol_txt = (symbol or "").strip().upper()
+    company_name_txt = str(company_name).strip()
+    has_symbol_suffix = bool(
+        re.search(rf"\(\s*{re.escape(symbol_txt)}\s*\)$", company_name_txt, flags=re.IGNORECASE)
+    )
+    display_name = company_name_txt if has_symbol_suffix else f"{company_name_txt} ({symbol_txt})"
 
     COMPANY_NAME_CACHE[symbol] = display_name
     trim_dict_cache(COMPANY_NAME_CACHE, MAX_COMPANY_CACHE_ITEMS)
@@ -7308,9 +7310,9 @@ def dashboard():
     platform_links = build_platform_links(user_platforms)
     platform_names = build_platform_names_for_header(user_platforms)
     requested_tab = request.args.get("tab") or request.form.get("active_tab") or "dashboard"
-    if requested_tab not in {"dashboard", "portfolio", "mintrend", "users"}:
+    if requested_tab not in {"dashboard", "portfolio", "mintrend", "users", "ai_background"}:
         requested_tab = "dashboard"
-    if requested_tab == "users" and not is_admin:
+    if requested_tab in {"users", "ai_background"} and not is_admin:
         requested_tab = "dashboard"
     active_tab = requested_tab
     fast_login_bootstrap = bool(session.pop("fast_login_bootstrap", False))
@@ -7363,7 +7365,7 @@ def dashboard():
                 "✅ Outcome Horizons uppdaterad: "
                 f"preset={outcome_cfg['preset_key']} | horisonter={','.join(str(h) for h in outcome_cfg['horizons'])}h"
             )
-            return redirect("/dashboard?tab=users")
+            return redirect("/dashboard?tab=ai_background")
 
         if "admin_apply_free_api_profile" in request.form:
             app_settings = save_app_settings(build_free_api_scheduler_profile())
@@ -7374,7 +7376,7 @@ def dashboard():
                 f"force_refresh={app_settings['ai_background_force_refresh']}, "
                 f"strategi={app_settings['ai_background_strategy']}, risk={app_settings['ai_background_risk']}"
             )
-            return redirect("/dashboard?tab=users")
+            return redirect("/dashboard?tab=ai_background")
 
         if "admin_save_ai_background" in request.form:
             interval_raw = (request.form.get("ai_background_interval_seconds") or "").strip()
@@ -7417,7 +7419,7 @@ def dashboard():
                 f"force_refresh={app_settings['ai_background_force_refresh']}, "
                 f"strategi={app_settings['ai_background_strategy']}, risk={app_settings['ai_background_risk']}"
             )
-            return redirect("/dashboard?tab=users")
+            return redirect("/dashboard?tab=ai_background")
 
         if "admin_add_user" in request.form:
             target = (request.form.get("admin_add_user") or request.form.get("admin_new_user_email") or "").strip().lower()

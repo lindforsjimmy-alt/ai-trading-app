@@ -1306,7 +1306,7 @@
         }
 
         function showTab(tab, button) {
-            ["dashboard", "portfolio", "mintrend", "users"].forEach(name => {
+            ["dashboard", "portfolio", "mintrend", "ai_background", "users"].forEach(name => {
                 const node = document.getElementById(name + "-tab");
                 if (node) node.style.display = "none";
             });
@@ -1603,10 +1603,14 @@
                 <circle cx="12" cy="17.1" r="0.95" fill="currentColor" />
             </svg>Egen analys</a>
         {% if is_admin %}
+        <button class="tab-button" data-tab="ai_background" onclick="showTab('ai_background', this)"><svg
+                class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-target"></use>
+            </svg>AI Drift</button>
         <button class="tab-button" data-tab="users" onclick="showTab('users', this)"><svg class="ui-icon"
                 style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <use href="#icon-users"></use>
-            </svg>Users</button>
+            </svg>Användare</button>
         {% endif %}
     </div>
 
@@ -2362,20 +2366,17 @@
     </div>
 
     {% if is_admin %}
-    <div id="users-tab" style="display:none;">
+    <div id="ai_background-tab" style="display:none;">
 
-        <h2><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <use href="#icon-users"></use>
-            </svg>Users</h2>
+        <h2><svg class="ui-icon" style="color:var(--accent);" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-target"></use>
+            </svg>AI Drift</h2>
 
         {% if users_msg %}
         <div class="selection-note">{{ users_msg }}</div>
         {% endif %}
 
         <div class="box" style="margin-top:16px;">
-            <h3><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <use href="#icon-target"></use>
-                </svg>AI Bakgrundsscan</h3>
             <p style="margin:0 0 10px; color: var(--muted);">
                 Styr global scan som körs periodiskt i bakgrunden.
                 {% if background_enabled %}
@@ -2396,7 +2397,7 @@
                 ({{ learning_storage_status.detail }}).
             </p>
             <form method="POST" style="display:grid; gap:10px; max-width:580px;">
-                <input type="hidden" name="active_tab" value="users">
+                <input type="hidden" name="active_tab" value="ai_background">
 
                 <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(125, 211, 252, 0.28);">
                     <b>API Budget Health</b><br>
@@ -2545,6 +2546,17 @@
                 </div>
             </form>
         </div>
+    </div>
+
+    <div id="users-tab" style="display:none;">
+
+        <h2><svg class="ui-icon" style="color:#9bdcff;" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <use href="#icon-users"></use>
+            </svg>Användare</h2>
+
+        {% if users_msg %}
+        <div class="selection-note">{{ users_msg }}</div>
+        {% endif %}
 
         <div class="container" style="margin-top:20px;">
 

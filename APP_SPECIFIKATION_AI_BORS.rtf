@@ -1,0 +1,119 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Calibri;}}
+\fs24
+\b APP-SPECIFIKATION: AI-BORS\b0\par
+Version: 1.0\par
+Datum: 2026-07-06\par
+\par
+\b 1. FUNKTIONER\b0\par
+1.1 Anvandare och behorighet\par
+- Inloggning, registrering, logout, losenordsbyte och glomt-losenord-flode.\par
+- Roller: admin och vanlig anvandare.\par
+- Admin kan hantera anvandare, godkanna avvaktningskonton och styra AI-relaterade driftinstallbackar.\par
+\par
+1.2 Dashboard och portfolio\par
+- Dashboard visar AI-genererade kandidater (aktier och krypto), signaler och analys.\par
+- Portfolio visar innehav, salj/listor, buy-more/wait-listor och sammanfattning av utveckling.\par
+- Min Trend-funktion ger trendoversikt med valbara index/range/currency.\par
+\par
+1.3 AI scanning och rekommendation\par
+- Appen kor AI-scans mot marknadsuniversum med hybridupplagg (core + rotation + nyhetsdriven booster).\par
+- Resultat rankas och presenteras som kop/salj/avvakta-liknande signalunderlag.\par
+- Fallbacklogik finns for att uppfylla top_n nar signalerna ar for strikta.\par
+\par
+1.4 Bakgrundsjobb (periodisk scan)\par
+- Bakgrundstrad startas per worker och kan vara aktiv i produktion utan manuell inloggning.\par
+- Intervall och scanparametrar styrs via app-installbackar och miljo-variabler.\par
+\par
+1.5 Admin-diagnostik\par
+- API Budget Health visar estimerad anropsbelastning, riskniva och rekommenderad scan-frekvens.\par
+- Learning Status och Learning Progress visar utfallsdata, mognad, sample coverage och stabilitet.\par
+- Live-rad i admin-UI visar aktiv lagringsbackend for learning (Postgres eller file fallback).\par
+\par
+\b 2. REGLER\b0\par
+2.1 Drift- och miljorregler\par
+- DATABASE_URL: om satt och tillganglig anvands Postgres som primar datakalla for learning data.\par
+- ENABLE_BACKGROUND: styr om periodisk AI-loop ar aktiv.\par
+- FREE_API_MODE: aktiverar snalare defaultparametrar for gratis-API-budget.\par
+\par
+2.2 Sakerhetsregler\par
+- Endast inloggade anvandare far oppna skyddade vyer (dashboard, portfolio, analys).\par
+- Endast admin far oppna users/admin-sektionen och spara adminspecifika driftinstallbackar.\par
+\par
+2.3 Dataintegritet\par
+- Om DB ar tillganglig skrivs learning data till tabeller i Postgres och overlever deploy/restart.\par
+- Om DB saknas/anrop misslyckas anvands file fallback for robusthet.\par
+- Pending outcomes hanteras med uppdatering per symbol + horisont for att undvika duplicering.\par
+\par
+2.4 API-budgetregler\par
+- Riskklassificering (lag/medel/hog) beraknas utifran estimerad quote-pressure per timme.\par
+- Vid hog risk rekommenderas langre intervall och/eller gratis-API profil.\par
+\par
+\b 3. LOGIK\b0\par
+3.1 Overgripande flode\par
+- Input: marknadslista, nyhetssignal, historik, anvandarinstallbackar, kapital/risk/strategi.\par
+- Bearbetning: hybrid scan-plan + ranking + signalgenerering + eventuella fallbackfyllningar.\par
+- Output: kandidatlistor till UI samt spardata till learning pipeline.\par
+\par
+3.2 Hybrid scan-logik\par
+- Core-set: stabil bas av symboler med hog relevans.\par
+- Rotation-set: roterande urval for exploration och diversifiering.\par
+- News boost: extra fokus nar nyhets-triggers bedoms tillrackligt starka.\par
+\par
+3.3 Outcome-evaluering\par
+- Nya rekommendationer registreras som pending outcomes med en eller flera tidshorisonter.\par
+- Vid forfallen horisont utvarderas faktiskt prisrorelse mot success-kriterium.\par
+- Utfallet loggas och pending-posten tas bort eller uppdateras till kvarvarande horisonter.\par
+\par
+3.4 Viktjustering (learning multipliers)\par
+- Utifran historiska utfall justeras multipliers (exempel: nyhetsvikt, rotationsvikt).\par
+- Smal samplestorlek ger forsiktigare effekt; storre sample tillater starkare justeringar.\par
+\par
+3.5 Rekommendationsfyllning\par
+- Om for fa toppsignaler finns, fylls listan med hogst rankade kandidater enligt fallbackregler.\par
+- Syfte: ge anvandbar volym utan att helt slappa kvalitetskrav.\par
+\par
+\b 4. AI-TRAINING\b0\par
+4.1 Traningstyp\par
+- Online outcome-based reinforcement via intern feedback-loop (ej tung modellfinetuning).\par
+- Systemet lar av realiserade utfall over tid och justerar vikter adaptivt.\par
+\par
+4.2 Traningens datakallor\par
+- Scan trace (vad som rankades, nar och med vilken kontext).\par
+- Pending outcomes (vad som ska utvarderas i framtiden).\par
+- Outcomes log (faktiskt utfall, success/fail, rorelse i procent, horisont).\par
+\par
+4.3 Traningens nyckeltal\par
+- Total outcomes, success-rate, genomsnittlig rorelse.\par
+- Per-horisont statistik (n och win-rate).\par
+- Maturity score, sample progress, stabilitet.\par
+\par
+4.4 Hållbarhet och persistens\par
+- Primar persistens i Postgres (tabeller for pending/log/trace).\par
+- File fallback for local/dev eller tillfallig DB-storning.\par
+- Designmal: ingen forlust av learning state vid vanliga deploy-cykler pa Render.\par
+\par
+\b 5. STRATEGIUPPLAGG FOR AI ATT HANTERA APPEN\b0\par
+5.1 Operativ strategi\par
+- Basdrift: FREE_API_MODE aktivt om budget ar begransad.\par
+- Scanfrekvens justeras utifran API Budget Health tills riskniva ar lag eller medel.\par
+- Outcome preset valjs efter tidshorisont i strategi: Kort, Mix eller Swing.\par
+\par
+5.2 AI-styrning av rekommendationer\par
+- Prioritera robusta signaler i core-set.\par
+- Behall kontrollerad exploration via rotation-set for att hitta nya vinnare.\par
+- Oka nyhetsvikt endast nar utfall visar stabil positiv effekt.\par
+\par
+5.3 Riskkontroll\par
+- Begransa aggressiva justeringar vid liten datamangd.\par
+- Hall fallbackregler aktiva for att undvika tomma rekommendationslistor.\par
+- Overvaka lagringsbackend i admin-UI och atgarda direkt vid fallback i produktion.\par
+\par
+5.4 Rekommenderad forvaltningsrutin\par
+- Veckovis: kontrollera Learning Status, Progress och API Budget Health.\par
+- Vid deploy: verifiera att backend status visar Postgres i produktion.\par
+- Manadsvis: utvardera preset, horisonter och success-threshold mot faktisk precision.\par
+\par
+\b SLUTSATS\b0\par
+Denna app ar byggd for kontinuerlig, kontrollerad AI-drift med adaptiv inlarning. Med DATABASE_URL aktiv och periodisk bakgrundsscan pa rimlig frekvens far du en stabil loop: scan -> rekommendation -> utfall -> justering -> battre rekommendationer over tid.\par
+}
