@@ -7531,6 +7531,14 @@ BullEye AI
         )
         return False, str(ex)
 
+        logger.info(
+            "Background AI startup config | ENABLE_BACKGROUND=%s AI_BACKGROUND_SCAN_INTERVAL_SECONDS=%s AI_BACKGROUND_SCAN_FORCE_REFRESH=%s AI_BACKGROUND_DEFAULT_STRATEGY=%s AI_BACKGROUND_DEFAULT_RISK=%s",
+            ENABLE_BACKGROUND,
+            AI_BACKGROUND_SCAN_INTERVAL_SECONDS,
+            AI_BACKGROUND_SCAN_FORCE_REFRESH,
+            AI_BACKGROUND_DEFAULT_STRATEGY,
+            AI_BACKGROUND_DEFAULT_RISK,
+        )
 def send_approval_email(new_user_email, base_url=None):
     if not is_email_enabled():
         logger.info("Email disabled via EMAIL_ENABLED; skipping approval request mail for %s", new_user_email)
