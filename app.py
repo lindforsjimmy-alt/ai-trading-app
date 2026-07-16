@@ -3740,9 +3740,15 @@ def get_crypto_assets():
 
     for page in range(1, COINGECKO_PAGES + 1):
         try:
-            data = requests.get(
-                f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}"
-            ).json()
+            resp = requests.get(
+                f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}",
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            if not isinstance(data, list):
+                continue
 
             for c in data:
                 
@@ -4581,6 +4587,10 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
 
     now = time.time()
     started_at = now
+    app_settings = load_app_settings()
+    effective_interval = get_effective_ai_refresh_interval(app_settings)
+    # Background scans should refresh on configured runtime interval, not only by fixed 24h cache TTL.
+    cache_ttl = max(60, min(AI_REFRESH_TIME, effective_interval))
     scan_mode = "manual" if force_refresh else "scheduled"
     update_ai_runtime_status(
         last_run_at=started_at,
@@ -4592,13 +4602,12 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     )
 
     # ✅ cache
-    if (not force_refresh) and ai_cache["data"] and now - ai_cache["last_run"] < AI_REFRESH_TIME:
+    if (not force_refresh) and ai_cache["data"] and now - ai_cache["last_run"] < cache_ttl:
         return ai_cache["data"]
 
     print("🔄 Running AI daily scan...")
 
     result = []
-    app_settings = load_app_settings()
     api_budget_health = build_api_budget_health(app_settings)
     learning_guardrails = build_learning_guardrails(app_settings, budget_health=api_budget_health)
 
@@ -4675,7 +4684,11 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         ),
         reverse=True,
     )
-    assets = assets[:MAX_DEEP_ANALYSIS_CANDIDATES]
+    stock_pool = [x for x in assets if x.get("type") == "stock"]
+    crypto_pool = [x for x in assets if x.get("type") == "crypto"]
+    crypto_reserved = min(len(crypto_pool), max(8, min(AI_CRYPTO_LIMIT, int(MAX_DEEP_ANALYSIS_CANDIDATES * 0.25))))
+    stock_cap = max(0, MAX_DEEP_ANALYSIS_CANDIDATES - crypto_reserved)
+    assets = stock_pool[:stock_cap] + crypto_pool[:crypto_reserved]
 
     for s in assets:
         
@@ -4695,7 +4708,13 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         if isinstance(price, dict):
             price = price.get("price", 0)
 
-        hist = get_historical_data(s["t"], "3mo")
+        symbol = s.get("t")
+        hist_symbol = symbol
+        if s.get("type") == "crypto" and symbol and "-" not in symbol:
+            hist_symbol = f"{symbol}-USD"
+        hist = get_historical_data(hist_symbol, "3mo")
+        if not hist and hist_symbol != symbol:
+            hist = get_historical_data(symbol, "3mo")
 
         prices = []
 
@@ -8731,10 +8750,6 @@ def dashboard():
         if x.get("type") == "crypto"
     ]
 
-    crypto_candidates = [
-        x for x in crypto_candidates
-        if x.get("trigger_score", 0) >= 2
-    ]
     crypto_buy_candidates = [
         x for x in crypto_candidates
         if x.get("signal") == "KÖP"
