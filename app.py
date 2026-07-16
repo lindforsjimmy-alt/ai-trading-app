@@ -8737,7 +8737,7 @@ def dashboard():
                     "ai_background_strategy": strategy_value,
                     "ai_background_risk": risk_value,
                     "ai_background_capital": capital_value,
-                    "ai_background_capital_profile": "",
+                    "ai_background_capital_profile": app_settings.get("ai_background_capital_profile", ""),
                     "ai_background_auto_throttle": auto_throttle_value,
                     "ai_learning_safe_mode": safe_mode_value,
                     "ai_learning_promotion_min_samples": promotion_min_samples_value,
