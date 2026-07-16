@@ -143,6 +143,10 @@ OUTCOME_TRACK_TOP_N = _env_int("OUTCOME_TRACK_TOP_N", 20)
 OUTCOME_SUCCESS_MOVE_PCT = float(os.environ.get("OUTCOME_SUCCESS_MOVE_PCT", "1.0"))
 LEARNING_MIN_OUTCOMES = _env_int("LEARNING_MIN_OUTCOMES", 25)
 LEARNING_MAX_ROWS = _env_int("LEARNING_MAX_ROWS", 500)
+LEARNING_PROFILE_OVERLAY_ENABLED = _env_bool("LEARNING_PROFILE_OVERLAY_ENABLED", True)
+LEARNING_PROFILE_OVERLAY_MIN_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_MIN_SAMPLES", 30)
+LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES", 120)
+LEARNING_PROFILE_OVERLAY_MAX_BLEND = max(0.0, min(0.6, float(os.environ.get("LEARNING_PROFILE_OVERLAY_MAX_BLEND", "0.35"))))
 
 
 def _parse_outcome_horizons(raw_value):
@@ -967,6 +971,15 @@ def _normalize_background_scheduler_settings(raw_data):
 
     whitelist = _parse_csv_symbol_list(data.get("ai_background_whitelist", []))
     blacklist = _parse_csv_symbol_list(data.get("ai_background_blacklist", []))
+    capital_profile_key = str(data.get("ai_background_capital_profile") or "").strip().lower()
+    if capital_profile_key not in {
+        "vary_small_capital_diversified",
+        "small_capital_diversified",
+        "medium_capital_diversified",
+        "high_capital_diversified",
+        "very_high_capital_diversified",
+    }:
+        capital_profile_key = ""
 
     horizons_raw = data.get("outcome_horizons", OUTCOME_HORIZONS)
     if isinstance(horizons_raw, (list, tuple)):
@@ -996,6 +1009,7 @@ def _normalize_background_scheduler_settings(raw_data):
         "ai_background_strategy": strategy,
         "ai_background_risk": risk,
         "ai_background_capital": capital,
+        "ai_background_capital_profile": capital_profile_key,
         "ai_background_auto_throttle": auto_throttle,
         "ai_learning_safe_mode": safe_mode,
         "ai_learning_promotion_min_samples": promotion_min_samples,
@@ -1048,12 +1062,94 @@ def build_free_api_scheduler_profile():
         "ai_background_strategy": "short",
         "ai_background_risk": "medium",
         "ai_background_capital": 5000,
+        "ai_background_capital_profile": "",
         "ai_background_auto_throttle": True,
         "ai_learning_safe_mode": True,
         "ai_learning_promotion_min_samples": AI_LEARNING_PROMOTION_MIN_SAMPLES_DEFAULT,
         "ai_learning_promotion_min_win_rate": AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT,
         "ai_background_whitelist": [],
         "ai_background_blacklist": [],
+    }
+
+
+CAPITAL_DIVERSIFIED_PROFILE_PRESETS = {
+    "vary_small_capital_diversified": {
+        "label": "Vary Small Capital Diversified",
+        "capital_usd": 600,
+        "strategy": "balanced",
+        "risk": "low",
+        "interval_seconds": 7200,
+    },
+    "small_capital_diversified": {
+        "label": "Small Capital Diversified",
+        "capital_usd": 1000,
+        "strategy": "balanced",
+        "risk": "medium",
+        "interval_seconds": 5400,
+    },
+    "medium_capital_diversified": {
+        "label": "Medium Capital Diversified",
+        "capital_usd": 2500,
+        "strategy": "balanced",
+        "risk": "medium",
+        "interval_seconds": 5400,
+    },
+    "high_capital_diversified": {
+        "label": "High Capital Diversified",
+        "capital_usd": 5000,
+        "strategy": "balanced",
+        "risk": "medium",
+        "interval_seconds": 5400,
+    },
+    "very_high_capital_diversified": {
+        "label": "Very High Capital Diversified",
+        "capital_usd": 10000,
+        "strategy": "balanced",
+        "risk": "medium",
+        "interval_seconds": 5400,
+    },
+}
+
+
+def get_capital_diversified_profile_options():
+    ordered_keys = [
+        "vary_small_capital_diversified",
+        "small_capital_diversified",
+        "medium_capital_diversified",
+        "high_capital_diversified",
+        "very_high_capital_diversified",
+    ]
+    out = []
+    for key in ordered_keys:
+        preset = CAPITAL_DIVERSIFIED_PROFILE_PRESETS.get(key) or {}
+        out.append(
+            {
+                "key": key,
+                "label": preset.get("label") or key,
+                "capital_usd": int(preset.get("capital_usd") or 0),
+                "strategy": preset.get("strategy") or "balanced",
+                "risk": preset.get("risk") or "medium",
+                "interval_seconds": int(preset.get("interval_seconds") or 5400),
+            }
+        )
+    return out
+
+
+def build_capital_diversified_profile(profile_key):
+    key = str(profile_key or "").strip().lower()
+    preset = CAPITAL_DIVERSIFIED_PROFILE_PRESETS.get(key)
+    if not preset:
+        return None
+
+    return {
+        "ai_background_interval_seconds": int(preset.get("interval_seconds") or 5400),
+        "ai_background_force_refresh": False,
+        "ai_background_strategy": str(preset.get("strategy") or "balanced"),
+        "ai_background_risk": str(preset.get("risk") or "medium"),
+        "ai_background_capital": int(preset.get("capital_usd") or 1000),
+        "ai_background_capital_profile": key,
+        "ai_background_auto_throttle": True,
+        "ai_learning_safe_mode": True,
     }
 
 
@@ -1849,6 +1945,28 @@ def evaluate_pending_outcomes():
         _rewrite_jsonl_rows(AI_PENDING_OUTCOMES_FILE, keep)
 
 
+def _normalize_interval_bucket(interval_seconds):
+    try:
+        seconds = int(interval_seconds or 0)
+    except Exception:
+        seconds = 0
+    if seconds <= 0:
+        return "unknown"
+    if seconds <= 1800:
+        return "fast"
+    if seconds <= 7200:
+        return "normal"
+    return "slow"
+
+
+def _build_learning_profile_key(strategy, risk, capital_profile_key, interval_bucket):
+    s = str(strategy or "all").strip().lower() or "all"
+    r = str(risk or "all").strip().lower() or "all"
+    cp = str(capital_profile_key or "all").strip().lower() or "all"
+    ib = str(interval_bucket or "all").strip().lower() or "all"
+    return f"{s}:{r}:{cp}:{ib}"
+
+
 def compute_learning_multipliers(current_meta=None):
     rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
     rows = [r for r in rows if isinstance(r.get("success"), bool)]
@@ -1856,6 +1974,8 @@ def compute_learning_multipliers(current_meta=None):
     meta = current_meta if isinstance(current_meta, dict) else {}
     current_strategy = str(meta.get("strategy") or "").strip().lower()
     current_risk = str(meta.get("risk") or "").strip().lower()
+    current_capital_profile = str(meta.get("capital_profile_key") or "").strip().lower()
+    current_interval_bucket = str(meta.get("interval_bucket") or "").strip().lower()
     now = time.time()
     decay_half_life_days = 30.0
     decay_lambda = math.log(2.0) / (decay_half_life_days * 86400.0)
@@ -1872,7 +1992,16 @@ def compute_learning_multipliers(current_meta=None):
             "news_mult": 1.0,
             "rotation_mult": 1.0,
             "sample_size": len(rows),
-            "profile_key": f"{current_strategy}:{current_risk}" if (current_strategy or current_risk) else "all",
+            "profile_key": _build_learning_profile_key(current_strategy, current_risk, current_capital_profile, current_interval_bucket),
+            "profile_overlay_enabled": bool(LEARNING_PROFILE_OVERLAY_ENABLED),
+            "profile_overlay_active": False,
+            "profile_overlay_sample_size": 0,
+            "profile_overlay_blend": 0.0,
+            "baseline_sample_size": len(rows),
+            "baseline_news_mult": 1.0,
+            "baseline_rotation_mult": 1.0,
+            "overlay_news_mult": 1.0,
+            "overlay_rotation_mult": 1.0,
         }
 
     def _weighted_rate(items, predicate=None):
@@ -1886,38 +2015,80 @@ def compute_learning_multipliers(current_meta=None):
                 win_w += weight
         return (win_w / total_w) if total_w > 0 else None
 
-    profile_items = weighted
-    if current_strategy:
-        strategy_items = [(r, w) for r, w in weighted if str(r.get("strategy_profile") or "").strip().lower() in {"", "okänt", current_strategy}]
-        if len(strategy_items) >= max(10, LEARNING_MIN_OUTCOMES // 3):
-            profile_items = strategy_items
-    if current_risk:
-        risk_items = [(r, w) for r, w in profile_items if str(r.get("risk_profile") or "").strip().lower() in {"", "okänt", current_risk}]
-        if len(risk_items) >= max(8, LEARNING_MIN_OUTCOMES // 4):
-            profile_items = risk_items
-
-    overall = _weighted_rate(profile_items) or 0.5
-    news_rate = _weighted_rate([x for x in profile_items if x[0].get("news_trigger") is True])
-    rot_rate = _weighted_rate([x for x in profile_items if x[0].get("rotation_candidate") is True])
     self_corr = get_learning_self_correction_state()
 
-    news_mult = 1.0
-    rotation_mult = 1.0
+    def _compute_from_items(items):
+        overall = _weighted_rate(items) or 0.5
+        news_rate = _weighted_rate([x for x in items if x[0].get("news_trigger") is True])
+        rot_rate = _weighted_rate([x for x in items if x[0].get("rotation_candidate") is True])
 
-    if news_rate is not None:
-        news_mult = max(0.7, min(1.4, 1.0 + ((news_rate - overall) * 1.2)))
+        news_mult = 1.0
+        rotation_mult = 1.0
 
-    if rot_rate is not None:
-        rotation_mult = max(0.75, min(1.35, 1.0 + ((rot_rate - overall) * 1.0)))
+        if news_rate is not None:
+            news_mult = max(0.7, min(1.4, 1.0 + ((news_rate - overall) * 1.2)))
+        if rot_rate is not None:
+            rotation_mult = max(0.75, min(1.35, 1.0 + ((rot_rate - overall) * 1.0)))
 
-    news_mult *= float(self_corr.get("news_mult") or 1.0)
-    rotation_mult *= float(self_corr.get("rotation_mult") or 1.0)
+        news_mult *= float(self_corr.get("news_mult") or 1.0)
+        rotation_mult *= float(self_corr.get("rotation_mult") or 1.0)
+        return news_mult, rotation_mult
+
+    baseline_news_mult, baseline_rotation_mult = _compute_from_items(weighted)
+
+    overlay_items = weighted
+    if current_strategy:
+        overlay_items = [
+            (r, w) for r, w in overlay_items
+            if str(r.get("strategy_profile") or "").strip().lower() in {"", "okänt", current_strategy}
+        ]
+    if current_risk:
+        overlay_items = [
+            (r, w) for r, w in overlay_items
+            if str(r.get("risk_profile") or "").strip().lower() in {"", "okänt", current_risk}
+        ]
+    if current_capital_profile:
+        overlay_items = [
+            (r, w) for r, w in overlay_items
+            if str(r.get("capital_profile_key") or "").strip().lower() == current_capital_profile
+        ]
+    if current_interval_bucket:
+        overlay_items = [
+            (r, w) for r, w in overlay_items
+            if str(r.get("interval_bucket") or "").strip().lower() == current_interval_bucket
+        ]
+
+    overlay_sample_size = len(overlay_items)
+    baseline_sample_size = len(weighted)
+    overlay_active = False
+    overlay_blend = 0.0
+    overlay_news_mult = baseline_news_mult
+    overlay_rotation_mult = baseline_rotation_mult
+
+    if LEARNING_PROFILE_OVERLAY_ENABLED and overlay_sample_size >= LEARNING_PROFILE_OVERLAY_MIN_SAMPLES:
+        overlay_active = True
+        overlay_news_mult, overlay_rotation_mult = _compute_from_items(overlay_items)
+        ramp_span = max(1, LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES - LEARNING_PROFILE_OVERLAY_MIN_SAMPLES)
+        ramp_progress = min(1.0, max(0.0, (overlay_sample_size - LEARNING_PROFILE_OVERLAY_MIN_SAMPLES) / float(ramp_span)))
+        overlay_blend = LEARNING_PROFILE_OVERLAY_MAX_BLEND * ramp_progress
+
+    news_mult = (baseline_news_mult * (1.0 - overlay_blend)) + (overlay_news_mult * overlay_blend)
+    rotation_mult = (baseline_rotation_mult * (1.0 - overlay_blend)) + (overlay_rotation_mult * overlay_blend)
 
     return {
         "news_mult": round(news_mult, 3),
         "rotation_mult": round(rotation_mult, 3),
         "sample_size": len(rows),
-        "profile_key": f"{current_strategy}:{current_risk}" if (current_strategy or current_risk) else "all",
+        "profile_key": _build_learning_profile_key(current_strategy, current_risk, current_capital_profile, current_interval_bucket),
+        "profile_overlay_enabled": bool(LEARNING_PROFILE_OVERLAY_ENABLED),
+        "profile_overlay_active": bool(overlay_active),
+        "profile_overlay_sample_size": int(overlay_sample_size),
+        "profile_overlay_blend": round(float(overlay_blend), 3),
+        "baseline_sample_size": int(baseline_sample_size),
+        "baseline_news_mult": round(float(baseline_news_mult), 3),
+        "baseline_rotation_mult": round(float(baseline_rotation_mult), 3),
+        "overlay_news_mult": round(float(overlay_news_mult), 3),
+        "overlay_rotation_mult": round(float(overlay_rotation_mult), 3),
         "volatility_penalty_mult": float(self_corr.get("volatility_penalty_mult") or 1.0),
         "stability_bonus_mult": float(self_corr.get("stability_bonus_mult") or 1.0),
         "diversification_pressure": float(self_corr.get("diversification_pressure") or 1.0),
@@ -1965,6 +2136,8 @@ def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at, sc
                 "rotation_candidate": sym in rotation_set and sym not in core_set,
                 "strategy_profile": str(meta.get("strategy") or "okänt").strip().lower(),
                 "risk_profile": str(meta.get("risk") or "okänt").strip().lower(),
+                "capital_profile_key": str(meta.get("capital_profile_key") or "").strip().lower(),
+                "interval_bucket": str(meta.get("interval_bucket") or "unknown").strip().lower(),
                 "asset_type": str(row.get("type") or "stock").strip().lower(),
                 "symbol_cluster": str(row.get("type") or "stock").strip().lower(),
             }
@@ -1974,9 +2147,18 @@ def register_scan_outcome_candidates(result_rows, scan_plan, scan_started_at, sc
 
 def build_learning_status():
     outcome_cfg = get_runtime_outcome_config()
+    app_settings = load_app_settings()
+    interval_bucket = _normalize_interval_bucket(app_settings.get("ai_background_interval_seconds"))
     rows = _read_jsonl_tail(AI_OUTCOMES_LOG_FILE, max_rows=LEARNING_MAX_ROWS)
     rows = [r for r in rows if isinstance(r.get("success"), bool)]
-    multipliers = compute_learning_multipliers()
+    multipliers = compute_learning_multipliers(
+        {
+            "strategy": app_settings.get("ai_background_strategy"),
+            "risk": app_settings.get("ai_background_risk"),
+            "capital_profile_key": app_settings.get("ai_background_capital_profile"),
+            "interval_bucket": interval_bucket,
+        }
+    )
 
     if not rows:
         return {
@@ -1988,6 +2170,12 @@ def build_learning_status():
             "learning_news_mult": multipliers.get("news_mult", 1.0),
             "learning_rotation_mult": multipliers.get("rotation_mult", 1.0),
             "sample_size": multipliers.get("sample_size", 0),
+            "profile_overlay_enabled": multipliers.get("profile_overlay_enabled", False),
+            "profile_overlay_active": multipliers.get("profile_overlay_active", False),
+            "profile_overlay_sample_size": multipliers.get("profile_overlay_sample_size", 0),
+            "profile_overlay_blend_pct": round(float(multipliers.get("profile_overlay_blend", 0.0)) * 100.0, 1),
+            "baseline_sample_size": multipliers.get("baseline_sample_size", 0),
+            "active_profile_key": multipliers.get("profile_key", "all"),
             "horizon_rows": [],
             "active_horizons": outcome_cfg.get("horizons", OUTCOME_HORIZONS),
             "success_move_pct": float(outcome_cfg.get("success_move_pct", OUTCOME_SUCCESS_MOVE_PCT)),
@@ -2028,6 +2216,12 @@ def build_learning_status():
         "learning_news_mult": multipliers.get("news_mult", 1.0),
         "learning_rotation_mult": multipliers.get("rotation_mult", 1.0),
         "sample_size": multipliers.get("sample_size", 0),
+        "profile_overlay_enabled": multipliers.get("profile_overlay_enabled", False),
+        "profile_overlay_active": multipliers.get("profile_overlay_active", False),
+        "profile_overlay_sample_size": multipliers.get("profile_overlay_sample_size", 0),
+        "profile_overlay_blend_pct": round(float(multipliers.get("profile_overlay_blend", 0.0)) * 100.0, 1),
+        "baseline_sample_size": multipliers.get("baseline_sample_size", 0),
+        "active_profile_key": multipliers.get("profile_key", "all"),
         "horizon_rows": horizon_rows,
         "active_horizons": outcome_cfg.get("horizons", OUTCOME_HORIZONS),
         "success_move_pct": float(outcome_cfg.get("success_move_pct", OUTCOME_SUCCESS_MOVE_PCT)),
@@ -4613,7 +4807,14 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
 
     with AI_LEARNING_LOCK:
         evaluate_pending_outcomes()
-        learning_multipliers = compute_learning_multipliers({"strategy": strategy, "risk": risk})
+        learning_multipliers = compute_learning_multipliers(
+            {
+                "strategy": strategy,
+                "risk": risk,
+                "capital_profile_key": app_settings.get("ai_background_capital_profile"),
+                "interval_bucket": _normalize_interval_bucket(effective_interval),
+            }
+        )
     self_correction = get_learning_self_correction_state()
 
     symbol_pool = market_scanner()
@@ -4993,7 +5194,17 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     print("--------------------------")
 
     with AI_LEARNING_LOCK:
-        register_scan_outcome_candidates(result, scan_plan, now, {"strategy": strategy, "risk": risk})
+        register_scan_outcome_candidates(
+            result,
+            scan_plan,
+            now,
+            {
+                "strategy": strategy,
+                "risk": risk,
+                "capital_profile_key": app_settings.get("ai_background_capital_profile"),
+                "interval_bucket": _normalize_interval_bucket(effective_interval),
+            },
+        )
         log_scan_trace(now, scan_plan, learning_multipliers, result, {"strategy": strategy, "risk": risk})
 
     # ✅ cache
@@ -8429,6 +8640,28 @@ def dashboard():
             )
             return redirect("/dashboard?tab=ai_background")
 
+        if "admin_apply_capital_diversified_profile" in request.form:
+            selected_profile_key = (request.form.get("capital_diversified_profile") or "").strip().lower()
+            profile_updates = build_capital_diversified_profile(selected_profile_key)
+            if not profile_updates:
+                session["users_msg"] = "❌ Ogiltig kapitalprofil vald"
+                return redirect("/dashboard?tab=ai_background")
+
+            app_settings = save_app_settings(profile_updates)
+            outcome_cfg = get_runtime_outcome_config(app_settings)
+            profile_label = (
+                CAPITAL_DIVERSIFIED_PROFILE_PRESETS.get(selected_profile_key, {}).get("label")
+                or selected_profile_key
+            )
+            session["users_msg"] = (
+                f"✅ Kapitalprofil aktiverad: {profile_label} | "
+                f"kapital={app_settings['ai_background_capital']} USD, "
+                f"strategi={app_settings['ai_background_strategy']}, "
+                f"risk={app_settings['ai_background_risk']}, "
+                f"intervall={app_settings['ai_background_interval_seconds']}s"
+            )
+            return redirect("/dashboard?tab=ai_background")
+
         if "admin_save_ai_background" in request.form:
             interval_raw = (request.form.get("ai_background_interval_seconds") or "").strip()
             capital_raw = (request.form.get("ai_background_capital") or "").strip()
@@ -8480,6 +8713,7 @@ def dashboard():
                     "ai_background_strategy": strategy_value,
                     "ai_background_risk": risk_value,
                     "ai_background_capital": capital_value,
+                    "ai_background_capital_profile": "",
                     "ai_background_auto_throttle": auto_throttle_value,
                     "ai_learning_safe_mode": safe_mode_value,
                     "ai_learning_promotion_min_samples": promotion_min_samples_value,
@@ -9000,6 +9234,7 @@ def dashboard():
     learning_progress = build_learning_progress_indicator()
     ai_runtime_status = build_ai_runtime_status()
     ai_quality_overview = build_quality_overview()
+    capital_profile_options = get_capital_diversified_profile_options()
     learning_diagnostic_report = build_learning_diagnostic_report()
     eight_d_reports = build_8d_report_archive()
     if not eight_d_reports and learning_diagnostic_report.get("has_data"):
@@ -9089,6 +9324,7 @@ def dashboard():
         mintrend_summary_display=mintrend_summary_display,
         mintrend_fx_info=mintrend_fx_info,
         ai_background_settings=app_settings,
+        capital_profile_options=capital_profile_options,
         api_budget_health=api_budget_health,
         learning_guardrails=learning_guardrails,
         learning_status=learning_status,
@@ -9284,6 +9520,8 @@ def portfolio_page():
         reverse=True
     )
 
+    capital_profile_options = get_capital_diversified_profile_options()
+
     
     return render_template(
         "dashboard.html",
@@ -9320,6 +9558,7 @@ def portfolio_page():
         mintrend_summary_display=mintrend_summary_display,
         mintrend_fx_info=mintrend_fx_info,
         ai_background_settings=app_settings,
+        capital_profile_options=capital_profile_options,
         api_budget_health=api_budget_health,
         learning_status=learning_status,
         learning_progress=learning_progress,

@@ -2561,6 +2561,12 @@
                             learning_status.latest_resolved }}</b><br>
                         Multipliers: news <b>{{ learning_status.learning_news_mult }}</b>, rotation <b>{{
                             learning_status.learning_rotation_mult }}</b> (sample {{ learning_status.sample_size }})<br>
+                        Läge: <b>{% if learning_status.profile_overlay_active %}Baseline + profil-overlay{% else
+                            %}Global baseline{% endif %}</b>
+                        | Blend: <b>{{ learning_status.profile_overlay_blend_pct }}%</b>
+                        | Profilsample: <b>{{ learning_status.profile_overlay_sample_size }}</b>
+                        | Baselinesample: <b>{{ learning_status.baseline_sample_size }}</b><br>
+                        Aktiv profilnyckel: <b>{{ learning_status.active_profile_key }}</b><br>
                         Horisonter:
                         {% for h in learning_status.horizon_rows %}
                         <span style="white-space:nowrap;">{{ h.horizon_hours }}h {{ h.win_rate_pct }}% (n={{ h.total
@@ -2829,6 +2835,54 @@
                         style="background: rgba(244, 180, 0, 0.2); border-color: rgba(244, 180, 0, 0.38);">
                         Använd gratis-API profil
                     </button>
+                </div>
+
+                <div class="asset-box" style="margin:4px 0 2px; border-color: rgba(112, 224, 0, 0.28);">
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
+                        <b>Kapitalprofiler (Diversified)</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:24px; height:24px; padding:0; border-radius:999px; font-size:0.85rem; font-weight:700; line-height:1; background: rgba(112, 224, 0, 0.2); border:1px solid rgba(112, 224, 0, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om kapitalprofiler">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>Kapitalprofiler</strong><br><br>
+                                Förinställningar för olika kapitalnivåer med fokus på diversifiering och låg
+                                API-kostnad.<br><br>
+                                Profilerna uppdaterar i ett steg: kapital, strategi, risk och intervall.<br><br>
+                                <strong>Rekommenderat kapital per nivå</strong><br>
+                                - <strong>Very low</strong>: 0-5 000 kr (Vary Small Capital Diversified)<br>
+                                - <strong>Low</strong>: 5 000-10 000 kr (Small Capital Diversified)<br>
+                                - <strong>Medium</strong>: 10 000-25 000 kr (Medium Capital Diversified)<br>
+                                - <strong>High</strong>: 25 000-50 000 kr (High Capital Diversified)<br>
+                                - <strong>Very high</strong>: 50 000+ kr (Very High Capital Diversified)<br><br>
+                                <strong>Konsekvens när du byter profil</strong><br>
+                                - AI rankar om kandidater utifrån ny kapitalnivå och riskprofil.<br>
+                                - Positionsförslag (antal/andel) ändras för att ge bredare eller mer koncentrerad
+                                fördelning.<br>
+                                - Kortare intervall ger snabbare uppdatering men högre API-tryck; längre intervall ger
+                                lägre kostnad.
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+                        <label style="display:grid; gap:4px; min-width:280px; flex:1;">
+                            <span style="font-size:0.9rem; color: var(--muted);">Välj profil</span>
+                            <select name="capital_diversified_profile">
+                                {% for p in capital_profile_options %}
+                                <option value="{{ p.key }}" {% if
+                                    ai_background_settings.ai_background_capital_profile==p.key %}selected{% endif %}>
+                                    {{ p.label }} ({{ p.capital_usd }} USD, {{ p.strategy }}, {{ p.risk }}, {{
+                                    p.interval_seconds }}s)
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit" name="admin_apply_capital_diversified_profile" value="1"
+                            style="background: rgba(112, 224, 0, 0.18); border-color: rgba(112, 224, 0, 0.34);">
+                            Använd kapitalprofil
+                        </button>
+                    </div>
                 </div>
 
                 <div style="display:flex; justify-content:flex-end;">
