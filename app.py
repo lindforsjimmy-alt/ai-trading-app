@@ -132,8 +132,8 @@ AI_LEARNING_PROMOTION_MIN_WIN_RATE_DEFAULT = float(os.environ.get("AI_LEARNING_P
 
 HYBRID_SCAN_CORE_SIZE = _env_int("HYBRID_SCAN_CORE_SIZE", 90 if FREE_API_MODE else 130)
 HYBRID_SCAN_ROTATION_WINDOW = _env_int("HYBRID_SCAN_ROTATION_WINDOW", 90 if FREE_API_MODE else 130)
-HYBRID_NEWS_TRIGGER_SAMPLE_SIZE = _env_int("HYBRID_NEWS_TRIGGER_SAMPLE_SIZE", 24 if FREE_API_MODE else 40)
-HYBRID_NEWS_TRIGGER_MAX_SYMBOLS = _env_int("HYBRID_NEWS_TRIGGER_MAX_SYMBOLS", 8 if FREE_API_MODE else 14)
+HYBRID_NEWS_TRIGGER_SAMPLE_SIZE = _env_int("HYBRID_NEWS_TRIGGER_SAMPLE_SIZE", 36 if FREE_API_MODE else 48)
+HYBRID_NEWS_TRIGGER_MAX_SYMBOLS = _env_int("HYBRID_NEWS_TRIGGER_MAX_SYMBOLS", 10 if FREE_API_MODE else 14)
 HYBRID_ROTATION_BONUS = float(os.environ.get("HYBRID_ROTATION_BONUS", "2.0"))
 HYBRID_NEWS_BONUS = float(os.environ.get("HYBRID_NEWS_BONUS", "5.0"))
 HYBRID_NOVELTY_DECAY_PER_MISS = float(os.environ.get("HYBRID_NOVELTY_DECAY_PER_MISS", "1.5"))
@@ -191,49 +191,49 @@ def _scan_profile_defaults(lean_mode):
     if lean_mode:
         return {
             "stable": {
-                "market_symbol_limit": 50,
-                "scan_candidate_limit": 90,
+                "market_symbol_limit": 180,
+                "scan_candidate_limit": 180,
                 "coingecko_pages": 1,
-                "ai_crypto_limit": 12,
-                "max_deep_analysis_candidates": 110,
+                "ai_crypto_limit": 16,
+                "max_deep_analysis_candidates": 180,
             },
             "balanced": {
-                "market_symbol_limit": 70,
-                "scan_candidate_limit": 140,
+                "market_symbol_limit": 240,
+                "scan_candidate_limit": 240,
                 "coingecko_pages": 1,
-                "ai_crypto_limit": 18,
-                "max_deep_analysis_candidates": 160,
+                "ai_crypto_limit": 24,
+                "max_deep_analysis_candidates": 240,
             },
             "aggressive": {
-                "market_symbol_limit": 95,
-                "scan_candidate_limit": 210,
+                "market_symbol_limit": 320,
+                "scan_candidate_limit": 320,
                 "coingecko_pages": 2,
-                "ai_crypto_limit": 28,
-                "max_deep_analysis_candidates": 230,
+                "ai_crypto_limit": 36,
+                "max_deep_analysis_candidates": 320,
             },
         }
 
     return {
         "stable": {
-            "market_symbol_limit": 90,
-            "scan_candidate_limit": 170,
+            "market_symbol_limit": 180,
+            "scan_candidate_limit": 180,
             "coingecko_pages": 2,
-            "ai_crypto_limit": 35,
-            "max_deep_analysis_candidates": 220,
+            "ai_crypto_limit": 40,
+            "max_deep_analysis_candidates": 180,
         },
         "balanced": {
-            "market_symbol_limit": 120,
-            "scan_candidate_limit": 220,
+            "market_symbol_limit": 240,
+            "scan_candidate_limit": 240,
             "coingecko_pages": 3,
-            "ai_crypto_limit": 60,
-            "max_deep_analysis_candidates": 260,
+            "ai_crypto_limit": 64,
+            "max_deep_analysis_candidates": 240,
         },
         "aggressive": {
-            "market_symbol_limit": 170,
+            "market_symbol_limit": 320,
             "scan_candidate_limit": 320,
             "coingecko_pages": 4,
-            "ai_crypto_limit": 90,
-            "max_deep_analysis_candidates": 360,
+            "ai_crypto_limit": 96,
+            "max_deep_analysis_candidates": 320,
         },
     }
 
@@ -1203,11 +1203,14 @@ def build_api_budget_health(settings):
 
     expected_scan_candidates = min(SCAN_CANDIDATE_LIMIT, MAX_DEEP_ANALYSIS_CANDIDATES)
     expected_crypto_assets = min(AI_CRYPTO_LIMIT, COINGECKO_PAGES * 250)
+    expected_news_probe_calls = min(HYBRID_NEWS_TRIGGER_SAMPLE_SIZE, HYBRID_SCAN_ROTATION_WINDOW)
 
     # Approximation: one quote call per scanned stock symbol during a fresh run.
     # History/news/fx calls are additional but generally lower than quote fan-out.
     est_quote_calls_per_run = max(0, int(expected_scan_candidates))
+    est_news_calls_per_run = max(0, int(expected_news_probe_calls))
     est_quote_calls_per_hour = est_quote_calls_per_run * runs_per_hour
+    est_news_calls_per_hour = est_news_calls_per_run * runs_per_hour
 
     yahoo_hour_budget = float(YAHOO_LIMIT_PER_MIN) * 60.0
     quote_pressure_pct = 0.0
@@ -1251,8 +1254,11 @@ def build_api_budget_health(settings):
         "runs_per_hour": round(runs_per_hour, 2),
         "expected_scan_candidates": expected_scan_candidates,
         "expected_crypto_assets": expected_crypto_assets,
+        "expected_news_probe_calls": expected_news_probe_calls,
         "est_quote_calls_per_run": est_quote_calls_per_run,
+        "est_news_calls_per_run": est_news_calls_per_run,
         "est_quote_calls_per_hour": int(round(est_quote_calls_per_hour)),
+        "est_news_calls_per_hour": int(round(est_news_calls_per_hour)),
         "yahoo_limit_per_min": YAHOO_LIMIT_PER_MIN,
         "yahoo_budget_per_hour": int(yahoo_hour_budget),
         "quote_pressure_pct": round(quote_pressure_pct, 1),
