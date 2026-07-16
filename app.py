@@ -143,6 +143,8 @@ OUTCOME_TRACK_TOP_N = _env_int("OUTCOME_TRACK_TOP_N", 20)
 OUTCOME_SUCCESS_MOVE_PCT = float(os.environ.get("OUTCOME_SUCCESS_MOVE_PCT", "1.0"))
 LEARNING_MIN_OUTCOMES = _env_int("LEARNING_MIN_OUTCOMES", 25)
 LEARNING_MAX_ROWS = _env_int("LEARNING_MAX_ROWS", 500)
+BUY_SCORE_THRESHOLD = _env_int("BUY_SCORE_THRESHOLD", 65)
+WATCH_SCORE_THRESHOLD = _env_int("WATCH_SCORE_THRESHOLD", 55)
 LEARNING_PROFILE_OVERLAY_ENABLED = _env_bool("LEARNING_PROFILE_OVERLAY_ENABLED", True)
 LEARNING_PROFILE_OVERLAY_MIN_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_MIN_SAMPLES", 30)
 LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES", 120)
@@ -4476,7 +4478,7 @@ def get_stop_loss(price, risk):
 def get_signal(price, score=None):
 
     if score is not None:
-        if score >= 72:
+        if score >= BUY_SCORE_THRESHOLD:
             return "KÖP"
         elif score >= 55:
             return "AVVAKTA KÖP"
@@ -8402,6 +8404,28 @@ def dedupe_by_symbol(items):
     return out
 
 
+def build_watch_candidates(rows, limit=8):
+    """Build a soft watchlist for candidates that are improving but not buy-ready yet."""
+    selected = []
+    seen = set()
+    for row in sorted(rows or [], key=lambda x: (float(x.get("score", 0) or 0), float(x.get("trigger_score", 0) or 0)), reverse=True):
+        if len(selected) >= max(0, int(limit or 0)):
+            break
+        if not isinstance(row, dict):
+            continue
+        symbol = (row.get("t") or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        score = float(row.get("score") or 0)
+        if score < WATCH_SCORE_THRESHOLD or score >= BUY_SCORE_THRESHOLD:
+            continue
+        if row.get("signal") not in {"AVVAKTA KÖP", "AVVAKTA"}:
+            continue
+        seen.add(symbol)
+        selected.append(row)
+    return selected
+
+
 def build_emergency_recommendations(limit=5):
     """Build a minimal fallback list so dashboard is never empty."""
     try:
@@ -8964,7 +8988,7 @@ def dashboard():
     ]
     stock_buy_candidates = [
         x for x in stock_candidates
-        if x.get("signal") == "KÖP"
+        if x.get("signal") == "KÖP" and float(x.get("score", 0) or 0) >= BUY_SCORE_THRESHOLD
     ]
     stock_buy_candidates = dedupe_by_symbol(stock_buy_candidates)
 
@@ -8974,48 +8998,6 @@ def dashboard():
             return selected
 
         selected_symbols = {x.get("t") for x in selected}
-
-        # Fallback 1: include AVVAKTA KÖP when strict KÖP is too sparse.
-        avvakta_kop = [
-            x for x in full_candidates
-            if x.get("signal") == "AVVAKTA KÖP" and x.get("t") not in selected_symbols
-        ]
-        for cand in avvakta_kop:
-            selected.append(cand)
-            selected_symbols.add(cand.get("t"))
-            if len(selected) >= limit:
-                return selected
-
-        # If still too few, allow owned symbols so user still gets enough ideas.
-        backup_pool = backup_candidates or []
-        backup = [
-            x for x in backup_pool
-            if x.get("signal") in {"KÖP", "AVVAKTA KÖP"} and x.get("t") not in selected_symbols
-        ]
-        backup = sorted(backup, key=lambda x: float(x.get("score", 0) or 0), reverse=True)
-        for cand in backup:
-            selected.append(cand)
-            selected_symbols.add(cand.get("t"))
-            if len(selected) >= limit:
-                return selected
-
-        # Final fallback: take highest-ranked symbols from full ranked pool (excluding duplicates)
-        # so UI can still return close to requested top_n even during sparse signal periods.
-        ranked_pool = ranked_pool or []
-        broad_backup = [
-            x for x in ranked_pool
-            if x.get("t") not in selected_symbols and x.get("signal") in {"KÖP", "AVVAKTA KÖP", "AVVAKTA"}
-        ]
-        broad_backup = sorted(
-            broad_backup,
-            key=lambda x: (float(x.get("score", 0) or 0), float(x.get("trigger_score", 0) or 0)),
-            reverse=True,
-        )
-        for cand in broad_backup:
-            selected.append(cand)
-            selected_symbols.add(cand.get("t"))
-            if len(selected) >= limit:
-                return selected
 
         return selected
 
@@ -9030,7 +9012,7 @@ def dashboard():
 
     crypto_buy_candidates = [
         x for x in crypto_candidates
-        if x.get("signal") == "KÖP"
+        if x.get("signal") == "KÖP" and float(x.get("score", 0) or 0) >= BUY_SCORE_THRESHOLD
     ]
     crypto_buy_candidates = dedupe_by_symbol(crypto_buy_candidates)
 
@@ -9048,6 +9030,15 @@ def dashboard():
         top_n,
         backup_candidates=crypto_candidates_with_owned,
         ranked_pool=[x for x in ranked_for_recommendations if x.get("type") == "crypto"],
+    )
+
+    stock_watch_candidates = build_watch_candidates(
+        [x for x in ranked_for_recommendations if x.get("type") != "crypto"],
+        limit=max(5, top_n),
+    )
+    crypto_watch_candidates = build_watch_candidates(
+        [x for x in ranked_for_recommendations if x.get("type") == "crypto"],
+        limit=max(5, top_n),
     )
 
     # ✅ PRIORITY
@@ -9091,9 +9082,11 @@ def dashboard():
 
     _ensure_display_names(stocks)
     _ensure_display_names(crypto)
+    _ensure_display_names(stock_watch_candidates)
+    _ensure_display_names(crypto_watch_candidates)
 
     # Dashboard-kandidater ska inte visa portfölj-P/L eftersom dessa inte är köpta innehav ännu.
-    for _row in (stocks + crypto + top_global):
+    for _row in (stocks + crypto + stock_watch_candidates + crypto_watch_candidates + top_global):
         if isinstance(_row, dict):
             _row.pop("pl", None)
             _row.pop("pl_pct", None)
@@ -9334,6 +9327,8 @@ def dashboard():
         learning_diagnostic_report=learning_diagnostic_report,
         eight_d_reports=eight_d_reports,
         learning_storage_status=learning_storage_status,
+        stock_watch_candidates=stock_watch_candidates,
+        crypto_watch_candidates=crypto_watch_candidates,
         background_enabled=ENABLE_BACKGROUND,
         free_api_mode=FREE_API_MODE,
         outcome_horizons=outcome_cfg["horizons"],

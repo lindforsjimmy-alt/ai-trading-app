@@ -1881,6 +1881,60 @@
 
             </div>
 
+            <!-- AKTIEBEVAKNING -->
+            <div class="box">
+                <h3><svg class="ui-icon" style="color:#f4b400;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-pause"></use>
+                    </svg>Aktiebevakning</h3>
+                <p class="section-guide"><strong>Fokus:</strong> kandidater som är på väg upp men ännu inte når
+                    köpgränsen 65.</p>
+
+                {% if stock_watch_candidates %}
+                {% for s in stock_watch_candidates %}
+                <div class="asset-box">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <b>{{ s.display_name or s.t }}</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om bevakningskandidat {{ s.t }}">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>På väg mot köp</strong><br><br>
+                                Den här kandidaten ligger under köpgränsen 65, men över bevakningströskeln.
+                                AI ser förbättring, men rekommenderar ännu inte ett aktivt köp.<br><br>
+                                När score når 65 eller mer flyttas den till köp-läget.
+                            </div>
+                        </div>
+                    </div>
+                    Pris: {{ '%.2f' % s.price }} USD ({{ '%.2f' % (s.price * usd_sek) }} SEK)<br>
+                    Score: {{ s.score }}<br>
+                    <div style="margin-top:6px; font-size:0.86rem; color:#93c5fd;">
+                        På väg mot köp
+                    </div>
+
+                    <button onclick="togglePopup(this)">AI Analys</button>
+
+                    <div class="ai-popup">
+                        <button onclick="closePopup(this)">❌</button>
+                        {% if s.investment_analysis %}
+                        <div style="font-size: 0.95rem; line-height: 1.6; color: #e2e8f0;">
+                            {{ s.investment_analysis|safe }}
+                        </div>
+                        {% elif s.summary %}
+                        {{ s.summary }}
+                        {% else %}
+                        Ingen AI-analys tillgänglig för denna kandidat ännu.
+                        {% endif %}
+                    </div>
+                </div>
+                <hr>
+                {% endfor %}
+                {% else %}
+                <p>Inga bevakningskandidater just nu.</p>
+                {% endif %}
+            </div>
+
             <!-- KRYPTO -->
             <div class="box">
                 <h3>🪙 KRYPTOKANDIDATER</h3>
@@ -1950,6 +2004,61 @@
                 </div>
                 {% endfor %}
 
+            </div>
+
+            <!-- KRYPTOBEVAKNING -->
+            <div class="box">
+                <h3><svg class="ui-icon" style="color:#f4b400;" viewBox="0 0 24 24" aria-hidden="true"
+                        focusable="false">
+                        <use href="#icon-pause"></use>
+                    </svg>Kryptobevakning</h3>
+                <p class="section-guide"><strong>Fokus:</strong> kryptokandidater som är på väg upp men ännu inte når
+                    köpgränsen 65.</p>
+
+                {% if crypto_watch_candidates %}
+                {% for s in crypto_watch_candidates %}
+                <div class="asset-box">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <b>{{ s.display_name or s.t }}</b>
+                        <button type="button" onclick="togglePopup(this)"
+                            style="width:22px; height:22px; padding:0; border-radius:999px; font-size:0.82rem; font-weight:700; line-height:1; background: rgba(125, 211, 252, 0.18); border:1px solid rgba(125, 211, 252, 0.36);">i</button>
+                        <div class="ai-popup" role="dialog" aria-label="Info om kryptobevakningskandidat {{ s.t }}">
+                            <button type="button" onclick="closePopup(this)">Stäng</button>
+                            <div>
+                                <strong>På väg mot köp</strong><br><br>
+                                Den här kryptokandidaten ligger under köpgränsen 65, men över bevakningströskeln.
+                                AI ser förbättring, men rekommenderar ännu inte ett aktivt köp.<br><br>
+                                När score når 65 eller mer flyttas den till köp-läget.
+                            </div>
+                        </div>
+                    </div>
+                    Pris: {% if s.price is defined %}{{ '%.2f' % s.price }} USD ({{ '%.2f' % (s.price * usd_sek) }}
+                    SEK){% else %}-{% endif %}<br>
+                    Score: {% if s.score is defined %}{{ s.score }}{% else %}-{% endif %}<br>
+                    <div style="margin-top:6px; font-size:0.86rem; color:#93c5fd;">
+                        På väg mot köp
+                    </div>
+
+                    <button onclick="togglePopup(this)">AI Analys</button>
+
+                    <div class="ai-popup">
+                        <button onclick="closePopup(this)">❌</button>
+                        {% if s.investment_analysis %}
+                        <div style="font-size: 0.95rem; line-height: 1.6; color: #e2e8f0;">
+                            {{ s.investment_analysis|safe }}
+                        </div>
+                        {% elif s.summary %}
+                        {{ s.summary }}
+                        {% else %}
+                        Ingen AI-analys tillgänglig för denna kandidat ännu.
+                        {% endif %}
+                    </div>
+                </div>
+                <hr>
+                {% endfor %}
+                {% else %}
+                <p>Inga kryptobevakningskandidater just nu.</p>
+                {% endif %}
             </div>
 
         </div>
