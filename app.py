@@ -4861,13 +4861,12 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         s["novelty_bonus"] = round(novelty_bonus, 2)
 
         if novelty_base > 0:
-            if s["signal"] == "KÖP" or s["score"] >= 75:
+            provisional_score = max(0, min(100, int(total_score)))
+            provisional_signal = get_signal(price, provisional_score)
+            if provisional_signal == "KÖP" or provisional_score >= 75:
                 NOVELTY_MISS_COUNTER[symbol_key] = 0
             else:
                 NOVELTY_MISS_COUNTER[symbol_key] = min(8, miss_count + 1)
-
-        # ✅ AI confidence (0–100%)
-        s["trigger_score"], s["trigger_reasons"] = get_trigger_score(s)
 
         # Cheap stability + fairness adjustments without extra API.
         previous_rank = previous_rank_positions.get(symbol_key)
