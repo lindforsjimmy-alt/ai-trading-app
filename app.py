@@ -5112,6 +5112,16 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         s["type_normalization"] = type_normalization
        
         s["score"] = max(0, min(100, int(total_score)))
+        s["trend_score"] = trend_score
+        s["rsi_score"] = rsi_score
+        s["ma_score"] = ma_score
+        s["news_score"] = news_score
+        s["base_signal"] = sig_base
+        s["volume_bonus"] = 3 if s.get("volume", 0) > 5_000_000 else 0
+        s["capital_penalty"] = -5 if (capital < 15000 and price > 200) else -3 if (capital > 30000 and price < 10) else 0
+        s["affordability_penalty"] = -10 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 1.0) else -5 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 2.0) else -2 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 3.0) else 1 if (capital > 0 and price > 0 and 4.0 <= (float(capital) / float(price)) <= 20.0) else 0
+        s["long_trend"] = get_trend_score_from_history(prices)
+        s["type_bias"] = type_bias
         s["signal"] = get_signal(price, s["score"])
         s["reason"] = get_reason(s["signal"], price, s["t"], s)
         s["summary"] = get_summary(s)
@@ -8197,6 +8207,12 @@ def build_watch_summary(s):
     signal = s.get("signal", "AVVAKTA")
     score = s.get("score", 0)
     trigger = s.get("trigger_score", 0)
+    gap = max(0, BUY_SCORE_THRESHOLD - int(score or 0))
+
+    trend_score = int(s.get("trend_score", 0) or 0)
+    rsi_score = int(s.get("rsi_score", 0) or 0)
+    ma_score = int(s.get("ma_score", 0) or 0)
+    news_score = int(s.get("news_score", 0) or 0)
 
     if signal == "KÖP":
         lead = "AI ser visst köpmomentum, men tillgången är inte prioriterad för direkt köp just nu."
@@ -8205,17 +8221,19 @@ def build_watch_summary(s):
     else:
         lead = "Signalen är neutral och tillräckligt svag för att avvakta just nu."
 
-    if trigger < 2:
-        trigger_txt = "Triggerstyrkan är ännu för låg för en tydlig köptrigger."
-    else:
-        trigger_txt = "Triggerstyrkan finns, men andra kandidater bedöms starkare just nu."
+    trigger_txt = (
+        "Triggerstyrkan är ännu för låg för en tydlig köptrigger."
+        if trigger < 2
+        else "Triggerstyrkan finns, men andra kandidater bedöms starkare just nu."
+    )
 
-    if score < 70:
-        score_txt = f"Score {score} är under nivån för topprekommendation."
-    else:
-        score_txt = f"Score {score} är okej, men räcker inte för att flyttas upp till AI Aktieval nu."
+    score_txt = f"Score {score} ligger {gap} poäng från köpgränsen {BUY_SCORE_THRESHOLD}."
 
-    return f"{lead} {trigger_txt} {score_txt}"
+    component_txt = (
+        f"Trend {trend_score}, RSI {rsi_score}, MA {ma_score}, nyheter {news_score}."
+    )
+
+    return f"{lead} {trigger_txt} {score_txt} {component_txt}"
 
 
 def generate_watch_analysis(s):
@@ -8224,6 +8242,21 @@ def generate_watch_analysis(s):
     trigger = s.get("trigger_score", 0)
     signal = s.get("signal", "AVVAKTA")
     summary = build_watch_summary(s)
+    gap = max(0, BUY_SCORE_THRESHOLD - int(score or 0))
+
+    trend_score = int(s.get("trend_score", 0) or 0)
+    rsi_score = int(s.get("rsi_score", 0) or 0)
+    ma_score = int(s.get("ma_score", 0) or 0)
+    news_score = int(s.get("news_score", 0) or 0)
+    volatility_pct = float(s.get("volatility_pct", 0) or 0)
+    volume = int(float(s.get("volume", 0) or 0))
+    long_trend = int(s.get("long_trend", 0) or 0)
+    type_normalization = int(s.get("type_normalization", 0) or 0)
+    stability_bonus = int(s.get("stability_bonus", 0) or 0)
+    novelty_bonus = float(s.get("novelty_bonus", 0) or 0)
+    capital_penalty = int(s.get("capital_penalty", 0) or 0)
+    affordability_penalty = int(s.get("affordability_penalty", 0) or 0)
+    volume_bonus = int(s.get("volume_bonus", 0) or 0)
 
     if signal == "KÖP":
         current_state = "Köpsignal finns, men tillgången är nedprioriterad jämfört med starkare kandidater."
@@ -8237,10 +8270,39 @@ def generate_watch_analysis(s):
     else:
         trigger_state = "Trigger finns, men totalrankingen är lägre än de aktiva KÖP-kandidaterna."
 
+    trend_state = (
+        "Trenddelen bidrar positivt."
+        if trend_score > 1
+        else "Trenddelen är svag eller neutral och behöver stärkas för att lyfta score."
+    )
+    rsi_state = (
+        "RSI ger ett okej köpläge."
+        if rsi_score > 0
+        else "RSI drar inte upp signalen just nu och behöver vända mer positivt."
+    )
+    ma_state = (
+        "MA-bilden stödjer uppgång."
+        if ma_score > 0
+        else "MA-bilden är neutral eller svag och behöver bekräfta en uppåttrend."
+    )
+    news_state = (
+        "Nyhetsflödet hjälper, men räcker inte ensam."
+        if news_score > 0
+        else "Nyhetsflödet är neutralt eller svagt och ger inget tydligt lyft i score."
+    )
+
+    if gap > 0:
+        needed_state = (
+            f"Tillgången behöver ungefär {gap} poäng till för att nå köpgränsen {BUY_SCORE_THRESHOLD}. "
+            "Det brukar komma från bättre trend/MA-bekräftelse, starkare nyheter eller en mer positiv momentumvändning."
+        )
+    else:
+        needed_state = f"Tillgången ligger redan på eller över köpgränsen {BUY_SCORE_THRESHOLD}."
+
     analysis_html = f"""
 <div style="margin-bottom: 14px;">
     <strong style="font-size:1.05rem;">📌 Sammanfattning</strong><br>
-    <span style="font-size:0.95rem;">AI rekommenderar <strong>{signal}</strong> för <strong>{symbol}</strong>. Nuvarande score: <strong>{score}</strong>, trigger: <strong>{trigger}</strong>.</span>
+    <span style="font-size:0.95rem;">AI rekommenderar <strong>{signal}</strong> för <strong>{symbol}</strong>. Nuvarande score: <strong>{score}</strong>, trigger: <strong>{trigger}</strong>. {needed_state}</span>
 </div>
 
 <div style="margin-bottom: 14px;">
@@ -8253,12 +8315,25 @@ def generate_watch_analysis(s):
     <span style="font-size:0.95rem;">{summary}<br>{trigger_state}</span>
 </div>
 
+<div style="margin-bottom: 14px;">
+    <strong style="font-size:1.05rem;">🔎 Score-komponenter</strong><br>
+    <span style="font-size:0.95rem;">
+    Trend: {trend_score}. {trend_state}<br>
+    RSI: {rsi_score}. {rsi_state}<br>
+    MA: {ma_score}. {ma_state}<br>
+    Nyheter: {news_score}. {news_state}<br>
+    Lång trend: {long_trend}. Volym: {volume}. Volatilitet: {volatility_pct:.2f}%<br>
+    Stabila bonusar: +{stability_bonus} stabilitet, +{volume_bonus} volym, +{novelty_bonus:.2f} nyhets/rotation, {type_normalization:+d} typjustering, {capital_penalty:+d} kapital, {affordability_penalty:+d} tillgänglighet.
+    </span>
+</div>
+
 <div style="margin-bottom: 8px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.3);">
     <strong style="font-size:1.05rem;">📋 Vad AI vill se före köp</strong><br>
     <span style="font-size:0.92rem;">
     • Starkare relativ score mot övriga kandidater<br>
-    • Tydligare trendbekräftelse och/eller momentum<br>
+    • Tydligare trendbekräftelse och/eller momentum
     • Positivt nyhetsflöde med bättre triggerutfall
+    • Färre negativa justeringar från volatilitet, kapital eller svag prisstruktur
     </span>
 </div>
 """
