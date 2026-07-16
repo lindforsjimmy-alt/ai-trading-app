@@ -8829,6 +8829,35 @@ def dashboard():
         stocks = stock_display_candidates[:top_n]
         crypto = crypto_display_candidates[:top_n]
 
+    def _ensure_display_names(rows):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = (row.get("t") or "").strip().upper()
+            if not symbol:
+                continue
+
+            current_display = (row.get("display_name") or "").strip()
+            row_type = (row.get("type") or "stock").strip().lower()
+
+            if row_type == "stock":
+                if not current_display or current_display.upper() == symbol:
+                    resolved = get_asset_display_name(symbol)
+                    if resolved:
+                        row["display_name"] = resolved
+                    else:
+                        row["display_name"] = symbol
+            else:
+                if not current_display or current_display.upper() == symbol:
+                    base_name = (row.get("name") or "").strip()
+                    if base_name and base_name.upper() != symbol:
+                        row["display_name"] = f"{base_name} ({symbol})"
+                    else:
+                        row["display_name"] = symbol
+
+    _ensure_display_names(stocks)
+    _ensure_display_names(crypto)
+
     # Dashboard-kandidater ska inte visa portfölj-P/L eftersom dessa inte är köpta innehav ännu.
     for _row in (stocks + crypto + top_global):
         if isinstance(_row, dict):
