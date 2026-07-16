@@ -8195,6 +8195,7 @@ def build_emergency_recommendations(limit=5):
     ]
     out = []
     seen = set()
+    stock_quota = max(1, target_limit // 2)
 
     for symbol in seeds:
         if symbol in seen:
@@ -8230,8 +8231,43 @@ def build_emergency_recommendations(limit=5):
                 "summary": "Reservrekommendation för att undvika tom dashboard under cache/API-störning.",
             }
         )
-        if len(out) >= target_limit:
+        if len(out) >= stock_quota:
             break
+
+    if len(out) < target_limit:
+        try:
+            for c in get_crypto_assets()[: max(4, target_limit)]:
+                symbol = (c.get("t") or "").strip().upper()
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+
+                price = float(c.get("price") or 0)
+                if price <= 0:
+                    continue
+
+                display_name = c.get("display_name") or c.get("name") or symbol
+                out.append(
+                    {
+                        "t": symbol,
+                        "name": c.get("name") or symbol,
+                        "display_name": display_name,
+                        "type": "crypto",
+                        "currency": "USD",
+                        "price": price,
+                        "volume": float(c.get("volume") or 0),
+                        "score": 52,
+                        "signal": "AVVAKTA KÖP",
+                        "trigger_score": 1,
+                        "trigger_reasons": ["Reservläge"],
+                        "reason": "Reservläge: tillfälligt urval medan full AI-scan laddar.",
+                        "summary": "Reservrekommendation (krypto) i väntan på full AI-scan.",
+                    }
+                )
+                if len(out) >= target_limit:
+                    break
+        except Exception:
+            pass
 
     return out
 
@@ -8637,7 +8673,8 @@ def dashboard():
         ensure_ai_background_loading(ai_strategy, ai_risk, amount)
         ranked = build_emergency_recommendations(max(top_n, 5))
         emergency_recommendations = bool(ranked)
-        ai_loading = not emergency_recommendations
+        # Keep loading state active in reserve mode so UI auto-refreshes to real scan results.
+        ai_loading = True
 
     loss_blocked_tickers = get_loss_blocked_tickers(user) if block_loss_sells else set()
     ranked_for_recommendations = [s for s in ranked if s.get("t") not in loss_blocked_tickers]
