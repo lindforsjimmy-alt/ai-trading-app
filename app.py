@@ -9717,6 +9717,14 @@ def portfolio_page():
         mintrend_currency = "USD"
 
     user_settings = load_user_settings(user)
+    amount = float(session.get("amount", user_settings.get("amount", 10000)) or 10000)
+    capital_currency = str(
+        session.get("capital_currency", user_settings.get("capital_currency", "SEK"))
+    ).upper()
+    ai_strategy = str(session.get("ai_strategy", user_settings.get("ai_strategy", "short")))
+    ai_risk = str(session.get("ai_risk", user_settings.get("ai_risk", "medium")))
+    top_n = int(session.get("top_n", user_settings.get("top_n", 5)) or 5)
+    priority = str(session.get("priority", user_settings.get("priority", "mix")))
     if request.method == "POST" and (
         "pf_strategy" in request.form or "pf_risk" in request.form or "block_loss_sells" in request.form
     ):
