@@ -9086,6 +9086,14 @@ def dashboard():
     # ✅ SETTINGS
 
     user_settings = load_user_settings(user)
+    amount = float(session.get("amount", user_settings.get("amount", 10000)) or 10000)
+    capital_currency = str(
+        session.get("capital_currency", user_settings.get("capital_currency", "SEK"))
+    ).upper()
+    ai_strategy = str(session.get("ai_strategy", user_settings.get("ai_strategy", "short")))
+    ai_risk = str(session.get("ai_risk", user_settings.get("ai_risk", "medium")))
+    top_n = int(session.get("top_n", user_settings.get("top_n", 5)) or 5)
+    priority = str(session.get("priority", user_settings.get("priority", "mix")))
     settings_form_submitted = (
         request.method == "POST"
         and (
@@ -9808,6 +9816,14 @@ def portfolio_page():
     )
     mintrend_fx_info = build_fx_info(fx_rates)
     ai_runtime_status = build_ai_runtime_status()
+    learning_guardrails = build_learning_guardrails(
+        app_settings,
+        learning_status,
+        api_budget_health,
+    )
+    ai_quality_overview = build_quality_overview()
+    learning_diagnostic_report = build_learning_diagnostic_report()
+    eight_d_reports = build_8d_report_archive()
 
     # ✅ Smart alerts (ingen spam)
     for s in sell_list:
@@ -9854,6 +9870,15 @@ def portfolio_page():
         admin_users=admin_users,
         pending_users=pending_users,
         usd_sek=usd_sek_rate,
+        amount=amount,
+        ai_strategy=ai_strategy,
+        ai_risk=ai_risk,
+        top_n=top_n,
+        priority=priority,
+        ai_loading=ai_loading,
+        emergency_recommendations=[],
+        ranked_count=len(ranked),
+        visible_count=0,
         sell_list=sell_list,
         buy_more_list=buy_more_list,
         wait_list=wait_list,
@@ -9861,7 +9886,7 @@ def portfolio_page():
         portfolio_source=portfolio_source,
         pf_strategy=pf_strategy,
         pf_risk=pf_risk,
-        capital_currency=session.get("capital_currency", "SEK"),
+        capital_currency=capital_currency,
         block_loss_sells=block_loss_sells,
         send_buy_alerts=send_buy_alerts,
         send_sell_alerts=send_sell_alerts,
@@ -9880,9 +9905,13 @@ def portfolio_page():
         ai_background_settings=app_settings,
         capital_profile_options=capital_profile_options,
         api_budget_health=api_budget_health,
+        learning_guardrails=learning_guardrails,
         learning_status=learning_status,
         learning_progress=learning_progress,
         ai_runtime_status=ai_runtime_status,
+        ai_quality_overview=ai_quality_overview,
+        learning_diagnostic_report=learning_diagnostic_report,
+        eight_d_reports=eight_d_reports,
         learning_storage_status=learning_storage_status,
         background_enabled=ENABLE_BACKGROUND,
         free_api_mode=FREE_API_MODE,
@@ -9893,6 +9922,8 @@ def portfolio_page():
         stocks=[],
         crypto=[],
         wait=[],
+        stock_watch_candidates=[],
+        crypto_watch_candidates=[],
     )
 
 
