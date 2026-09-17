@@ -126,7 +126,7 @@ def signal(t):
         return "HOLD"
 
 
-def buy(user, t, qty, price_val):
+def buy(user, t, qty, price_val, portfolio_source="simulated"):
     """Registrerar köp i `stock_data/my_trades.txt`."""
     if db_enabled():
         user_id = get_user_id(user)
@@ -135,16 +135,16 @@ def buy(user, t, qty, price_val):
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO trades (user_id, ticker, side, qty, price)
-                        VALUES (%s, %s, 'BUY', %s, %s)
+                        INSERT INTO trades (user_id, ticker, side, qty, price, portfolio_source)
+                        VALUES (%s, %s, 'BUY', %s, %s, %s)
                         """,
-                        (user_id, str(t).upper(), float(qty), float(price_val)),
+                        (user_id, str(t).upper(), float(qty), float(price_val), portfolio_source),
                     )
                 conn.commit()
             return
 
     with open(FILE, "a") as f:
-        f.write(f"{user}|{t}|{qty}|{price_val}\n")
+        f.write(f"{user}|{t}|{qty}|{price_val}|{portfolio_source}\n")
 
 
 def _record_sale_event(user, t, sold_qty, avg_buy_price, sell_price):
@@ -193,7 +193,7 @@ def _record_sale_event(user, t, sold_qty, avg_buy_price, sell_price):
         pass
 
 
-def sell(user, t, qty, price_val=None):
+def sell(user, t, qty, price_val=None, portfolio_source="simulated"):
     """Utför en enkel sell genom att uppdatera poster i trades-filen."""
     sell_price = float(price_val or 0)
     if sell_price <= 0:
@@ -213,9 +213,9 @@ def sell(user, t, qty, price_val=None):
                         """
                         SELECT COALESCE(SUM(qty), 0), COALESCE(SUM(qty * price), 0)
                         FROM trades
-                        WHERE user_id = %s AND ticker = %s AND side = 'BUY'
+                        WHERE user_id = %s AND ticker = %s AND side = 'BUY' AND portfolio_source = %s
                         """,
-                        (user_id, str(t).upper()),
+                        (user_id, str(t).upper(), portfolio_source),
                     )
                     basis_row = cur.fetchone() or (0, 0)
                     held_qty = int(float(basis_row[0] or 0))
@@ -226,10 +226,10 @@ def sell(user, t, qty, price_val=None):
                         """
                         SELECT id, qty
                         FROM trades
-                        WHERE user_id = %s AND ticker = %s AND side = 'BUY'
+                        WHERE user_id = %s AND ticker = %s AND side = 'BUY' AND portfolio_source = %s
                         ORDER BY id
                         """,
-                        (user_id, str(t).upper()),
+                        (user_id, str(t).upper(), portfolio_source),
                     )
                     rows = cur.fetchall()
 
@@ -261,15 +261,16 @@ def sell(user, t, qty, price_val=None):
         parts = l.strip().split("|")
         if len(parts) < 4:
             continue
-        u, ticker, q, p = parts
+        u, ticker, q, p = parts[:4]
+        row_source = parts[4] if len(parts) > 4 else "simulated"
         q = int(float(q))
         p = float(p)
 
-        if u == user and ticker == t:
+        if u == user and ticker == t and row_source == portfolio_source:
             held_qty += q
             held_cost += q * p
 
-        if u == user and ticker == t and remaining > 0:
+        if u == user and ticker == t and row_source == portfolio_source and remaining > 0:
             new_q = q - remaining
             if new_q > 0:
                 new.append(f"{u}|{ticker}|{new_q}|{p}\n")

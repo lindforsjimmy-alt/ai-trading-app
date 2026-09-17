@@ -2078,6 +2078,25 @@
                 <path d="M9 12.5h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
             </svg>Portfolio</h2>
 
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin:10px 0 16px;">
+            <a href="/portfolio?portfolio_source=simulated"
+                style="padding:8px 12px; border:1px solid {% if portfolio_source == 'simulated' %}#38bdf8{% else %}#475569{% endif %}; border-radius:5px; color:#e5eefb; text-decoration:none;">Testportfölj</a>
+            <a href="/portfolio?portfolio_source=avanza"
+                style="padding:8px 12px; border:1px solid {% if portfolio_source == 'avanza' %}#38bdf8{% else %}#475569{% endif %}; border-radius:5px; color:#e5eefb; text-decoration:none;">Avanza-portfölj</a>
+            {% if portfolio_source == 'avanza' %}
+            <a href="/portfolio/import-avanza"
+                style="padding:8px 12px; border:1px solid #38bdf8; border-radius:5px; color:#7dd3fc; text-decoration:none;">Importera
+                Avanza CSV</a>
+            {% endif %}
+        </div>
+        {% if portfolio_source == 'simulated' %}
+        <p style="color:#b3c7df;">Testportföljen används för teoretisk utveckling och påverkas inte av Avanza-importer.
+        </p>
+        {% else %}
+        <p style="color:#b3c7df;">Avanza-portföljen innehåller endast transaktioner som du har importerat från Avanza.
+        </p>
+        {% endif %}
+
         {% if portfolio_summary %}
         <div class="asset-box" style="margin:12px 0 16px; border-color: rgba(125, 211, 252, 0.28);">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">

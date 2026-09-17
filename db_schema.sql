@@ -28,14 +28,21 @@ CREATE TABLE IF NOT EXISTS trades (
   side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
   qty NUMERIC(20,8) NOT NULL CHECK (qty > 0),
   price NUMERIC(20,8) NOT NULL CHECK (price > 0),
+  portfolio_source TEXT NOT NULL DEFAULT 'simulated' CHECK (portfolio_source IN ('simulated', 'avanza')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE trades
+  ADD COLUMN IF NOT EXISTS portfolio_source TEXT NOT NULL DEFAULT 'simulated';
 
 CREATE INDEX IF NOT EXISTS ix_trades_user_created
   ON trades (user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS ix_trades_user_ticker
   ON trades (user_id, ticker);
+
+CREATE INDEX IF NOT EXISTS ix_trades_user_source
+  ON trades (user_id, portfolio_source);
 
 CREATE TABLE IF NOT EXISTS trade_sales (
   id BIGSERIAL PRIMARY KEY,
@@ -57,6 +64,13 @@ CREATE INDEX IF NOT EXISTS ix_trade_sales_user_ticker
 
 CREATE INDEX IF NOT EXISTS ix_trade_sales_user_loss
   ON trade_sales (user_id, sold_with_loss);
+
+CREATE TABLE IF NOT EXISTS avanza_import_rows (
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, fingerprint)
+);
 
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

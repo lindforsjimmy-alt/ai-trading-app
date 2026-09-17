@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="sv">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Importera Avanza CSV</title>
+    <style>
+        body {
+            margin: 0;
+            background: #0b1220;
+            color: #e5eefb;
+            font-family: Arial, sans-serif;
+        }
+
+        main {
+            max-width: 1080px;
+            margin: 32px auto;
+            padding: 0 20px 48px;
+        }
+
+        a {
+            color: #7dd3fc;
+        }
+
+        .panel {
+            margin-top: 18px;
+            padding: 20px;
+            border: 1px solid #28415f;
+            background: #101b2d;
+            border-radius: 8px;
+        }
+
+        .notice {
+            padding: 12px;
+            border-radius: 6px;
+            background: #142a3f;
+        }
+
+        .error {
+            color: #fecaca;
+            background: #3a1820;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+            font-size: 0.9rem;
+        }
+
+        th,
+        td {
+            padding: 9px;
+            text-align: left;
+            border-bottom: 1px solid #28415f;
+            vertical-align: top;
+        }
+
+        th {
+            color: #bae6fd;
+        }
+
+        textarea,
+        input {
+            margin-top: 8px;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+        }
+
+        button {
+            margin-top: 14px;
+            padding: 10px 14px;
+            border: 1px solid #38bdf8;
+            border-radius: 5px;
+            background: #075985;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        code {
+            color: #bae6fd;
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <p><a href="/portfolio">Tillbaka till Portfolio</a></p>
+        <h1>Importera Avanza CSV</h1>
+        <p class="notice">Filen sparas inte. Endast bekräftade köp och sälj importeras. Fonder, utdelningar, inlösen och
+            interna överföringar lämnas utanför.</p>
+
+        {% if error %}<p class="error"><strong>{{ error }}</strong></p>{% endif %}
+
+        {% if not transactions %}
+        <section class="panel">
+            <form method="post" enctype="multipart/form-data">
+                <label for="csv_file">Avanza CSV-fil</label><br>
+                <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" required>
+                <br><button type="submit" name="action" value="preview">Förhandsgranska fil</button>
+            </form>
+        </section>
+        {% else %}
+        <section class="panel">
+            <h2>Importerbara transaktioner</h2>
+            <p><strong>{{ transactions|length }}</strong> köp eller sälj kan importeras. <strong>{{ skipped|length
+                    }}</strong> rader hoppas över.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Konto</th>
+                        <th>Typ</th>
+                        <th>Kategori</th>
+                        <th>Värdepapper</th>
+                        <th>Antal</th>
+                        <th>Kurs</th>
+                        <th>Valuta</th>
+                        <th>ISIN</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in transactions %}
+                    <tr>
+                        <td>{{ item.date }}</td>
+                        <td>{{ item.account }}</td>
+                        <td>{{ item.side }}</td>
+                        <td>{{ "Krypto" if item.asset_type == "crypto" else "Aktie" }}</td>
+                        <td>{{ item.security }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>{{ item.price }}</td>
+                        <td>{{ item.currency }}</td>
+                        <td><code>{{ item.isin }}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if skipped %}
+            <details>
+                <summary>Överhoppade rader</summary>
+                <ul>{% for item in skipped %}<li>{{ item }}</li>{% endfor %}</ul>
+            </details>
+            {% endif %}
+        </section>
+
+        <section class="panel">
+            <h2>Koppla till marknadssymbol</h2>
+            <p>Appen gissar aldrig symbol. Ange en rad per ISIN i formatet <code>ISIN=SYMBOL</code>. Exempel:
+                <code>US5949724083=MSTR</code>.</p>
+            <form method="post">
+                <input type="hidden" name="draft_token" value="{{ draft_token }}">
+                <label for="symbol_mappings">ISIN och marknadssymbol</label>
+                <textarea id="symbol_mappings" name="symbol_mappings" required
+                    placeholder="US5949724083=MSTR&#10;US8485603067=SPIR"></textarea>
+                <label><input type="checkbox" name="confirm_import" value="yes" required> Jag har granskat
+                    transaktionerna och vill importera dem.</label>
+                <br><button type="submit" name="action" value="import">Importera bekräftade transaktioner</button>
+            </form>
+        </section>
+        {% endif %}
+    </main>
+</body>
+
+</html>

@@ -20,6 +20,7 @@ from datetime import timedelta, datetime
 import finnhub
 import threading
 from sp500_list import SP500_SYMBOLS
+from avanza_import import parse_avanza_csv, parse_symbol_mappings
 from trading import buy, sell
 
 # Make logging/prints resilient on Windows terminals using cp1252.
@@ -328,11 +329,14 @@ AI_OUTCOMES_LOG_FILE = "stock_data/ai_outcomes_log.jsonl"
 AI_SCAN_TRACE_FILE = "stock_data/ai_scan_trace.jsonl"
 AI_8D_REPORTS_INDEX_FILE = "stock_data/ai_8d_reports.jsonl"
 SOLD_TRADES_FILE = "stock_data/sold_trades.txt"
+AVANZA_IMPORT_LOG_FILE = "stock_data/avanza_import_rows.txt"
 GLOBAL_TICKERS_FILE = "stock_data/global_tickers.txt"
 OMX_TICKERS_FILE = "stock_data/omx_tickers.csv"
 USER_SETTINGS_LOCK = threading.Lock()
 APP_SETTINGS_LOCK = threading.Lock()
 AI_LEARNING_LOCK = threading.Lock()
+AVANZA_IMPORT_LOCK = threading.Lock()
+AVANZA_IMPORT_DRAFTS = {}
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 LEARNING_DB_TABLE_BY_FILE = {
@@ -348,6 +352,75 @@ def db_enabled():
 
 def db_connect():
     return psycopg.connect(DATABASE_URL)
+
+
+def _avanza_imported_fingerprints(user):
+    target = (user or "").strip().lower()
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS avanza_import_rows (
+                            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            fingerprint TEXT NOT NULL,
+                            imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            PRIMARY KEY (user_id, fingerprint)
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        SELECT r.fingerprint FROM avanza_import_rows r
+                        JOIN users u ON u.id = r.user_id
+                        WHERE LOWER(u.email) = LOWER(%s)
+                        """,
+                        (target,),
+                    )
+                    return {row[0] for row in cur.fetchall()}
+        except Exception as ex:
+            logger.warning("Could not load Avanza import log for %s: %s", target, ex)
+
+    try:
+        with open(AVANZA_IMPORT_LOG_FILE, encoding="utf-8") as file:
+            return {
+                parts[1]
+                for line in file
+                if len(parts := line.strip().split("|", 1)) == 2 and parts[0] == target
+            }
+    except FileNotFoundError:
+        return set()
+
+
+def _mark_avanza_rows_imported(user, fingerprints):
+    target = (user or "").strip().lower()
+    fingerprints = list(fingerprints)
+    if not fingerprints:
+        return
+    if db_enabled():
+        record = db_find_user(target)
+        if record:
+            try:
+                with db_connect() as conn:
+                    with conn.cursor() as cur:
+                        for fingerprint in fingerprints:
+                            cur.execute(
+                                """
+                                INSERT INTO avanza_import_rows (user_id, fingerprint)
+                                VALUES (%s, %s) ON CONFLICT DO NOTHING
+                                """,
+                                (record["id"], fingerprint),
+                            )
+                    conn.commit()
+                return
+            except Exception as ex:
+                logger.warning("Could not save Avanza import log for %s: %s", target, ex)
+
+    with AVANZA_IMPORT_LOCK:
+        with open(AVANZA_IMPORT_LOG_FILE, "a", encoding="utf-8") as file:
+            for fingerprint in fingerprints:
+                file.write(f"{target}|{fingerprint}\n")
 
 
 def db_find_user(email):
@@ -5904,7 +5977,7 @@ def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, incl
 # ===== DATA (portfolio & trades) =====
 # ===== DATA =====
 
-def portfolio(user):
+def portfolio(user, portfolio_source="simulated"):
     if db_enabled():
         target = (user or "").strip().lower()
         try:
@@ -5916,10 +5989,11 @@ def portfolio(user):
                         FROM trades t
                         JOIN users u ON u.id = t.user_id
                         WHERE LOWER(u.email) = LOWER(%s)
-                          AND t.side = 'BUY'
+                                                    AND t.side = 'BUY'
+                                                    AND t.portfolio_source = %s
                         GROUP BY t.ticker
                         """,
-                        (target,),
+                                                (target, portfolio_source),
                     )
                     rows = cur.fetchall()
             result = []
@@ -5948,9 +6022,10 @@ def portfolio(user):
             if len(parts) < 4:
                 continue
 
-            u, t, q, p = parts
+            u, t, q, p = parts[:4]
+            row_source = parts[4] if len(parts) > 4 else "simulated"
 
-            if u != user:
+            if u != user or row_source != portfolio_source:
                 continue
 
             q = int(float(q))
@@ -9510,11 +9585,87 @@ def report_8d_txt(filename):
     return send_file(full_path, mimetype="text/plain", as_attachment=False)
 
 
+@app.route("/portfolio/import-avanza", methods=["GET", "POST"])
+def import_avanza_portfolio():
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+
+    error = ""
+    transactions = []
+    skipped = []
+    draft_token = ""
+    action = request.form.get("action")
+    if request.method == "POST" and action == "preview":
+        uploaded_file = request.files.get("csv_file")
+        if not uploaded_file or not uploaded_file.filename:
+            error = "Valj en CSV-fil fran Avanza."
+        else:
+            try:
+                transactions, skipped = parse_avanza_csv(uploaded_file.read())
+                if not transactions:
+                    error = "Filen innehaller inga importerbara aktie- eller kryptotransaktioner."
+                else:
+                    draft_token = secrets.token_urlsafe(24)
+                    AVANZA_IMPORT_DRAFTS[draft_token] = {
+                        "user": user.strip().lower(),
+                        "transactions": transactions,
+                        "skipped": skipped,
+                    }
+            except ValueError as ex:
+                error = str(ex)
+
+    if request.method == "POST" and action == "import":
+        draft_token = request.form.get("draft_token", "")
+        draft = AVANZA_IMPORT_DRAFTS.get(draft_token)
+        if not draft or draft["user"] != user.strip().lower():
+            error = "Forhandsgranskningen har gatt ut. Ladda upp filen igen."
+        elif request.form.get("confirm_import") != "yes":
+            error = "Bekrafta importen innan transaktionerna sparas."
+        else:
+            transactions = draft["transactions"]
+            skipped = draft["skipped"]
+            mappings = parse_symbol_mappings(request.form.get("symbol_mappings", ""))
+            unresolved = sorted({item["isin"] for item in transactions if item["isin"] not in mappings})
+            if unresolved:
+                error = "Ange marknadssymbol for: " + ", ".join(unresolved)
+            else:
+                known_fingerprints = _avanza_imported_fingerprints(user)
+                imported = []
+                for item in transactions:
+                    if item["fingerprint"] in known_fingerprints:
+                        continue
+                    symbol = mappings[item["isin"]]
+                    if item["side"] == "BUY":
+                        buy(user, symbol, item["quantity"], item["price"], portfolio_source="avanza")
+                    else:
+                        sell(user, symbol, item["quantity"], item["price"], portfolio_source="avanza")
+                    imported.append(item["fingerprint"])
+                _mark_avanza_rows_imported(user, imported)
+                AVANZA_IMPORT_DRAFTS.pop(draft_token, None)
+                session["portfolio_source"] = "avanza"
+                session["users_msg"] = f"Importerade {len(imported)} Avanza-transaktioner."
+                return redirect("/portfolio")
+
+    return render_template(
+        "avanza_import.html",
+        error=error,
+        transactions=transactions,
+        skipped=skipped,
+        draft_token=draft_token,
+    )
+
+
 @app.route("/portfolio", methods=["GET", "POST"])
 def portfolio_page():
     user = session.get("user")
     if not user:
         return redirect("/login")
+
+    portfolio_source = (request.args.get("portfolio_source") or session.get("portfolio_source") or "simulated").lower()
+    if portfolio_source not in {"simulated", "avanza"}:
+        portfolio_source = "simulated"
+    session["portfolio_source"] = portfolio_source
 
     is_admin = is_admin_email(user)
     app_settings = load_app_settings()
@@ -9592,7 +9743,7 @@ def portfolio_page():
         },
     )
 
-    pf = portfolio(user)
+    pf = portfolio(user, portfolio_source)
     view = build_portfolio_view(pf, ranked, pf_strategy, pf_risk, include_analysis=True)
     pf = view["positions"]
     sell_list = view["sell_list"]
@@ -9680,7 +9831,7 @@ def portfolio_page():
         platform_links=platform_links,
         platform_names=platform_names,
         is_admin=is_admin,
-        users_msg="",
+        users_msg=session.pop("users_msg", ""),
         registered_users=registered_users,
         regular_users=regular_users,
         admin_users=admin_users,
@@ -9690,6 +9841,7 @@ def portfolio_page():
         buy_more_list=buy_more_list,
         wait_list=wait_list,
         portfolio_summary=portfolio_summary,
+        portfolio_source=portfolio_source,
         pf_strategy=pf_strategy,
         pf_risk=pf_risk,
         capital_currency=session.get("capital_currency", "SEK"),
