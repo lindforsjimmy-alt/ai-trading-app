@@ -3597,6 +3597,75 @@ def get_price(symbol, allow_finnhub=True):
 
     return None
 
+
+PORTFOLIO_PRICE_CACHE = {}
+PORTFOLIO_PRICE_CACHE_TIME = 60
+
+
+def get_crypto_price(symbol):
+    """Hämtar aktuellt kryptopris utan att vara beroende av AI-scan-cachen."""
+    normalized = (symbol or "").strip().lower()
+    if not normalized:
+        return None
+
+    now = time.time()
+    cached = PORTFOLIO_PRICE_CACHE.get(("crypto", normalized))
+    if cached and now - cached[1] < PORTFOLIO_PRICE_CACHE_TIME:
+        return cached[0]
+
+    try:
+        response = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={"vs_currency": "usd", "symbols": normalized, "per_page": 10, "page": 1},
+            timeout=5,
+        )
+        if response.status_code != 200:
+            return None
+
+        rows = response.json()
+        if not isinstance(rows, list):
+            return None
+
+        symbol_upper = normalized.upper()
+        match = next(
+            (row for row in rows if str(row.get("symbol") or "").upper() == symbol_upper),
+            None,
+        )
+        price = float(match.get("current_price") or 0) if match else 0
+        if price <= 0:
+            return None
+
+        PORTFOLIO_PRICE_CACHE[("crypto", normalized)] = (price, now)
+        return price
+    except (TypeError, ValueError, requests.RequestException) as ex:
+        logger.warning("Crypto portfolio price fetch failed for %s: %s", symbol, ex)
+        return None
+
+
+def get_portfolio_live_price(symbol, asset_type=None):
+    """Returnerar ett färskt innehavpris och använder AI-pris endast som fallback."""
+    normalized = (symbol or "").strip().upper()
+    if not normalized:
+        return None
+
+    if (asset_type or "").strip().lower() == "crypto":
+        return get_crypto_price(normalized)
+
+    stock_price = get_price(normalized, allow_finnhub=True)
+    if isinstance(stock_price, dict):
+        value = stock_price.get("price")
+    else:
+        value = stock_price
+    try:
+        if value is not None and float(value) > 0:
+            return float(value)
+    except (TypeError, ValueError):
+        pass
+
+    # Holdings created before asset type was stored may still be crypto.
+    return get_crypto_price(normalized)
+
+
 # ===== FINNHUB FUNDAMENTAL DATA =====
 def get_company_profile(symbol):
     now = time.time()
@@ -4406,23 +4475,27 @@ def get_historical_data(symbol, period):
 # ===== RSI =====
 def calculate_rsi(prices, period=14):
 
-    if not prices or len(prices) < period:
+    if not prices or len(prices) < period + 1:
         return 50
 
-    gains = []
-    losses = []
+    changes = []
+    for current, previous in zip(prices[-period:], prices[-period - 1:-1]):
+        try:
+            changes.append(float(current) - float(previous))
+        except (TypeError, ValueError):
+            continue
 
-    for i in range(1, period):
-        change = prices[i] - prices[i - 1]
+    if not changes:
+        return 50
 
-        if change > 0:
-            gains.append(change)
-        else:
-            losses.append(abs(change))
+    gains = [change for change in changes if change > 0]
+    losses = [-change for change in changes if change < 0]
 
     avg_gain = sum(gains) / period if gains else 0
     avg_loss = sum(losses) / period if losses else 0
 
+    if avg_loss == 0 and avg_gain == 0:
+        return 50
     if avg_loss == 0:
         return 100
 
@@ -4486,7 +4559,7 @@ def get_signal(price, score=None):
     if score is not None:
         if score >= BUY_SCORE_THRESHOLD:
             return "KÖP"
-        elif score >= 55:
+        elif score >= WATCH_SCORE_THRESHOLD:
             return "AVVAKTA KÖP"
         elif score <= 35:
             return "SÄLJ"
@@ -4912,7 +4985,8 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         if isinstance(price, dict):
             price = price.get("price", 0)
 
-        sig_base = get_signal(price)
+        # Price level is not a signal: a cheap share is not automatically a buy.
+        sig_base = "AVVAKTA"
        
         if isinstance(price, dict):
             price = price.get("price", 0)
@@ -4973,7 +5047,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         rotation_mult = float(learning_multipliers.get("rotation_mult", 1.0))
 
         # ✅ base score
-        base = 80 if sig_base == "KÖP" else 60 if sig_base == "AVVAKTA KÖP" else 30
+        base = 50
 
         total_score = (
             base
@@ -5747,8 +5821,9 @@ def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, incl
         if qty <= 0 or avg_price <= 0:
             continue
 
-        current_price = avg_price
-        if match:
+        asset_type = (match.get("type") if match else s.get("type")) or ""
+        current_price = get_portfolio_live_price(symbol, asset_type)
+        if current_price is None and match:
             current_price = match.get("price", avg_price)
             if isinstance(current_price, dict):
                 current_price = current_price.get("price", avg_price)
