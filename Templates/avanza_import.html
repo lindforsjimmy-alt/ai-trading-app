@@ -96,8 +96,20 @@
     <main>
         <p><a href="/portfolio">Tillbaka till Portfolio</a></p>
         <h1>Importera Avanza CSV</h1>
-        <p class="notice">Filen sparas inte. Endast bekräftade köp och sälj importeras. Fonder, utdelningar, inlösen och
-            interna överföringar lämnas utanför.</p>
+        <p class="notice">Filen sparas inte. Endast vanliga aktieköp och aktieförsäljningar importeras. Fonder,
+            krypto-ETP:er, utdelningar, inlösen och interna överföringar lämnas utanför tills appen har en verifierad
+            kurskälla i samma valuta.</p>
+
+        <section class="panel">
+            <h2>Rensa felimporterad Avanza-portfölj</h2>
+            <p>Tar endast bort importerade Avanza-transaktioner och deras dubblettlogg. Testportföljen påverkas inte.
+            </p>
+            <form method="post" action="/portfolio/reset-avanza">
+                <label><input type="checkbox" name="confirm_reset" value="yes" required> Jag vill rensa
+                    Avanza-portföljen.</label>
+                <br><button type="submit">Rensa Avanza-portfölj</button>
+            </form>
+        </section>
 
         {% if error %}<p class="error"><strong>{{ error }}</strong></p>{% endif %}
 
@@ -155,7 +167,8 @@
         <section class="panel">
             <h2>Koppla till marknadssymbol</h2>
             <p>Appen gissar aldrig symbol. Ange en rad per ISIN i formatet <code>ISIN=SYMBOL</code>. Exempel:
-                <code>US5949724083=MSTR</code>.</p>
+                <code>US5949724083=MSTR</code>.
+            </p>
             <form method="post">
                 <input type="hidden" name="draft_token" value="{{ draft_token }}">
                 <label for="symbol_mappings">ISIN och marknadssymbol</label>

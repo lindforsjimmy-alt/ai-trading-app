@@ -433,6 +433,52 @@ def _mark_avanza_rows_imported(user, fingerprints):
                 file.write(f"{target}|{fingerprint}\n")
 
 
+def _clear_avanza_portfolio(user):
+    target = (user or "").strip().lower()
+    if db_enabled():
+        record = db_find_user(target)
+        if record:
+            with db_connect() as conn:
+                _ensure_portfolio_source_schema(conn)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM trades WHERE user_id = %s AND portfolio_source = 'avanza'",
+                        (record["id"],),
+                    )
+                    deleted_trades = cur.rowcount
+                    cur.execute("DELETE FROM avanza_import_rows WHERE user_id = %s", (record["id"],))
+                conn.commit()
+            return deleted_trades
+
+    deleted_trades = 0
+    try:
+        with AVANZA_IMPORT_LOCK:
+            existing_lines = open(DATA_FILE, encoding="utf-8").readlines()
+            retained_lines = []
+            for line in existing_lines:
+                parts = line.strip().split("|")
+                row_user = (parts[0] or "").strip().lower() if parts else ""
+                row_source = parts[4] if len(parts) > 4 else "simulated"
+                if row_user == target and row_source == "avanza":
+                    deleted_trades += 1
+                    continue
+                retained_lines.append(line)
+            with open(DATA_FILE, "w", encoding="utf-8") as file:
+                file.writelines(retained_lines)
+
+            try:
+                existing_log_lines = open(AVANZA_IMPORT_LOG_FILE, encoding="utf-8").readlines()
+            except FileNotFoundError:
+                existing_log_lines = []
+            with open(AVANZA_IMPORT_LOG_FILE, "w", encoding="utf-8") as file:
+                file.writelines(
+                    line for line in existing_log_lines if not line.startswith(f"{target}|")
+                )
+    except FileNotFoundError:
+        return 0
+    return deleted_trades
+
+
 def db_find_user(email):
     if not db_enabled():
         return None
@@ -9678,6 +9724,23 @@ def import_avanza_portfolio():
         skipped=skipped,
         draft_token=draft_token,
     )
+
+
+@app.route("/portfolio/reset-avanza", methods=["POST"])
+def reset_avanza_portfolio():
+    user = session.get("user")
+    if not user:
+        return redirect("/login")
+    if request.form.get("confirm_reset") != "yes":
+        session["users_msg"] = "Bekrafta aterstallningen innan Avanza-portfoljen tas bort."
+        return redirect("/portfolio?portfolio_source=avanza")
+
+    deleted_trades = _clear_avanza_portfolio(user)
+    session["portfolio_source"] = "avanza"
+    session["users_msg"] = (
+        f"Rensade {deleted_trades} Avanza-transaktioner. Testportfoljen ar oforandrad."
+    )
+    return redirect("/portfolio?portfolio_source=avanza")
 
 
 @app.route("/portfolio", methods=["GET", "POST"])

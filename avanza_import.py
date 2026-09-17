@@ -19,7 +19,7 @@ REQUIRED_COLUMNS = frozenset(
 )
 SUPPORTED_TRANSACTION_TYPES = {"Köp": "BUY", "Sälj": "SELL"}
 FUND_NAME_PREFIXES = ("avanza auto", "lansforsakringar", "länsförsäkringar")
-CRYPTO_KEYWORDS = ("bitcoin", "ethereum", "solana", "hyperliquid", "valour")
+CRYPTO_ETP_KEYWORDS = ("valour", "virtune", "coinshares", "21shares")
 
 
 def _number(value: str) -> float | None:
@@ -36,8 +36,8 @@ def _asset_type(security: str) -> str:
     normalized = security.lower()
     if normalized.startswith(FUND_NAME_PREFIXES):
         return "fund"
-    if any(keyword in normalized for keyword in CRYPTO_KEYWORDS):
-        return "crypto"
+    if any(keyword in normalized for keyword in CRYPTO_ETP_KEYWORDS):
+        return "crypto_etp"
     return "stock"
 
 
@@ -72,6 +72,11 @@ def parse_avanza_csv(raw_bytes: bytes) -> tuple[list[dict[str, object]], list[st
         asset_type = _asset_type(security)
         if asset_type == "fund":
             skipped.append(f"Rad {row_number}: fonden {security} importeras inte till aktier eller krypto")
+            continue
+        if asset_type == "crypto_etp":
+            skipped.append(
+                f"Rad {row_number}: krypto-ETP:n {security} importeras inte utan en verifierad ETP-kurs i samma valuta"
+            )
             continue
 
         fingerprint_source = "|".join(
