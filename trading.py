@@ -23,6 +23,16 @@ def db_connect():
     return psycopg.connect(DATABASE_URL)
 
 
+def _ensure_portfolio_source_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS portfolio_source TEXT NOT NULL DEFAULT 'simulated'
+            """
+        )
+
+
 def _fallback_sold_trades_file():
     return "stock_data/sold_trades.txt"
 
@@ -132,6 +142,7 @@ def buy(user, t, qty, price_val, portfolio_source="simulated"):
         user_id = get_user_id(user)
         if user_id is not None:
             with db_connect() as conn:
+                _ensure_portfolio_source_schema(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -208,6 +219,7 @@ def sell(user, t, qty, price_val=None, portfolio_source="simulated"):
                 return
 
             with db_connect() as conn:
+                _ensure_portfolio_source_schema(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         """

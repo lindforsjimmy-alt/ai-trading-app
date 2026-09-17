@@ -354,6 +354,16 @@ def db_connect():
     return psycopg.connect(DATABASE_URL)
 
 
+def _ensure_portfolio_source_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            ALTER TABLE trades
+            ADD COLUMN IF NOT EXISTS portfolio_source TEXT NOT NULL DEFAULT 'simulated'
+            """
+        )
+
+
 def _avanza_imported_fingerprints(user):
     target = (user or "").strip().lower()
     if db_enabled():
@@ -5982,6 +5992,7 @@ def portfolio(user, portfolio_source="simulated"):
         target = (user or "").strip().lower()
         try:
             with db_connect() as conn:
+                _ensure_portfolio_source_schema(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -6016,7 +6027,12 @@ def portfolio(user, portfolio_source="simulated"):
 
     data = {}
 
-    with open(DATA_FILE) as f:
+    try:
+        data_file = open(DATA_FILE)
+    except FileNotFoundError:
+        return []
+
+    with data_file as f:
         for l in f:
             parts = l.strip().split("|")
             if len(parts) < 4:
@@ -9791,6 +9807,7 @@ def portfolio_page():
         usd_eur_rate,
     )
     mintrend_fx_info = build_fx_info(fx_rates)
+    ai_runtime_status = build_ai_runtime_status()
 
     # ✅ Smart alerts (ingen spam)
     for s in sell_list:
@@ -9865,6 +9882,7 @@ def portfolio_page():
         api_budget_health=api_budget_health,
         learning_status=learning_status,
         learning_progress=learning_progress,
+        ai_runtime_status=ai_runtime_status,
         learning_storage_status=learning_storage_status,
         background_enabled=ENABLE_BACKGROUND,
         free_api_mode=FREE_API_MODE,
