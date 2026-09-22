@@ -4734,6 +4734,25 @@ def is_tradeable(s):
 
     return True
 
+
+def get_portfolio_fit_score(price, capital):
+    """Score position affordability without changing the market signal score."""
+    try:
+        price_value = float(price or 0)
+        capital_value = float(capital or 0)
+    except (TypeError, ValueError):
+        return 0
+    if price_value <= 0 or capital_value <= 0:
+        return 0
+    affordable_units = capital_value / price_value
+    if affordable_units < 1:
+        return 0
+    if affordable_units < 3:
+        return 1
+    if affordable_units <= 20:
+        return 3
+    return 2
+
 def get_score(sig, price, t):
     base = 80 if sig == "KÖP" else 60 if sig == "AVVAKTA KÖP" else 30
 
@@ -5124,9 +5143,9 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         hist_symbol = symbol
         if s.get("type") == "crypto" and symbol and "-" not in symbol:
             hist_symbol = f"{symbol}-USD"
-        hist = get_historical_data(hist_symbol, "3mo")
+        hist = get_historical_data(hist_symbol, "1y")
         if not hist and hist_symbol != symbol:
-            hist = get_historical_data(symbol, "3mo")
+            hist = get_historical_data(symbol, "1y")
 
         prices = []
 
@@ -5207,27 +5226,6 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
 
         if s.get("volume", 0) > 5_000_000:
             total_score += 3
-
-        # ✅ kapital-filter
-
-        if capital < 15000 and price > 200:
-            total_score -= 5
-
-        if capital > 30000 and price < 10:
-            total_score -= 3
-
-        # Extra affordability guardrail: if capital cannot buy at least one unit,
-        # strongly deprioritize the symbol. Keep moderate penalties for low unit count.
-        if capital > 0 and price > 0:
-            affordable_units = float(capital) / float(price)
-            if affordable_units < 1.0:
-                total_score -= 10
-            elif affordable_units < 2.0:
-                total_score -= 5
-            elif affordable_units < 3.0:
-                total_score -= 2
-            elif 4.0 <= affordable_units <= 20.0:
-                total_score += 1
 
         # ✅ FILTER beroende på strategi
 
@@ -5315,14 +5313,16 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         s["type_normalization"] = type_normalization
        
         s["score"] = max(0, min(100, int(total_score)))
+        s["signal_score"] = s["score"]
+        s["portfolio_fit_score"] = get_portfolio_fit_score(price, capital)
         s["trend_score"] = trend_score
         s["rsi_score"] = rsi_score
         s["ma_score"] = ma_score
         s["news_score"] = news_score
         s["base_signal"] = sig_base
         s["volume_bonus"] = 3 if s.get("volume", 0) > 5_000_000 else 0
-        s["capital_penalty"] = -5 if (capital < 15000 and price > 200) else -3 if (capital > 30000 and price < 10) else 0
-        s["affordability_penalty"] = -10 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 1.0) else -5 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 2.0) else -2 if (capital > 0 and price > 0 and (float(capital) / float(price)) < 3.0) else 1 if (capital > 0 and price > 0 and 4.0 <= (float(capital) / float(price)) <= 20.0) else 0
+        s["capital_penalty"] = 0
+        s["affordability_penalty"] = 0
         s["long_trend"] = get_trend_score_from_history(prices)
         s["type_bias"] = type_bias
         s["signal"] = get_signal(price, s["score"])
@@ -5390,6 +5390,20 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         signal = item.get("signal", "AVVAKTA")
         signal_counts[signal] = signal_counts.get(signal, 0) + 1
 
+    score_bands = {"0-44": 0, "45-54": 0, "55-64": 0, "65-74": 0, "75-100": 0}
+    for item in result:
+        score = int(item.get("score", 0) or 0)
+        if score < 45:
+            score_bands["0-44"] += 1
+        elif score < 55:
+            score_bands["45-54"] += 1
+        elif score < BUY_SCORE_THRESHOLD:
+            score_bands["55-64"] += 1
+        elif score < 75:
+            score_bands["65-74"] += 1
+        else:
+            score_bands["75-100"] += 1
+
     logger.info(
         "AI signal distribution | KÖP=%s AVVAKTA_KÖP=%s AVVAKTA=%s SÄLJ=%s total=%s",
         signal_counts.get("KÖP", 0),
@@ -5398,6 +5412,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         signal_counts.get("SÄLJ", 0),
         len(result),
     )
+    logger.info("AI score distribution | %s", score_bands)
     logger.info(
         "Hybrid scan mix | scanned=%s core=%s rotation=%s news_trigger=%s | learning news_mult=%s rotation_mult=%s sample=%s",
         len(scan_plan.get("symbols", [])),
@@ -9299,7 +9314,17 @@ def dashboard():
             return selected
 
         selected_symbols = {x.get("t") for x in selected}
-
+        for candidates in (full_candidates, backup_candidates or [], ranked_pool or []):
+            for candidate in candidates:
+                symbol = candidate.get("t")
+                if not symbol or symbol in selected_symbols:
+                    continue
+                if candidate.get("signal") not in {"AVVAKTA KÖP", "AVVAKTA"}:
+                    continue
+                selected.append(candidate)
+                selected_symbols.add(symbol)
+                if len(selected) >= limit:
+                    return selected
         return selected
 
     crypto_candidates = [
