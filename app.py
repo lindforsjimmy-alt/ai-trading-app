@@ -9135,7 +9135,10 @@ def dashboard():
                 session["users_msg"] = f"ℹ️ {target} är redan admin"
             else:
                 if add_admin_email(target):
-                    session["users_msg"] = f"✅ {target} är nu admin"
+                    if is_admin_email(target):
+                        session["users_msg"] = f"✅ {target} är nu admin"
+                    else:
+                        session["users_msg"] = f"❌ {target} sparades men kunde inte verifieras som admin"
                 else:
                     session["users_msg"] = f"❌ Kunde inte uppdatera admin för {target}"
             return redirect("/dashboard?tab=users")
