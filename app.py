@@ -2,6 +2,7 @@
 
 # ===== IMPORTS =====
 import builtins as _builtins
+import html
 import json
 import re
 
@@ -8168,17 +8169,28 @@ Du kan logga in med din registrerade email här:
 Välkommen!
 """
 
-    msg = MIMEText(body)
+    login_url = html.escape(f"{BASE_URL}/login", quote=True)
+    html_body = (
+        "<html><body>"
+        "<p>Ditt konto i BullEye AI har nu blivit godkänt.</p>"
+        f'<p><a href="{login_url}">BullEye AI</a></p>'
+        "<p>Logga in med din registrerade e-postadress.</p>"
+        "</body></html>"
+    )
+
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = "BullEye AI - Konto godkänt"
     msg["From"] = sender
     msg["To"] = user_email
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     # Prefer Brevo API when configured to avoid SMTP auth issues.
     api_ok, api_err = send_mail_via_brevo_api(
         [user_email],
         "BullEye AI - Konto godkänt",
         body,
-        None,
+        html_body,
     )
     if api_ok:
         logger.info("ACCOUNT APPROVAL MAIL SENT TO: %s (Brevo API)", user_email)
@@ -8265,8 +8277,17 @@ Logga in och byt lösenord direkt efter inloggning.
 """
 
     subject = "BullEye AI - Nytt lösenord"
+    login_url = html.escape(f"{BASE_URL}/login", quote=True)
+    html_body = (
+        "<html><body>"
+        "<p>Du har begärt återställning av lösenord för BullEye AI.</p>"
+        f"<p><strong>Ditt nya tillfälliga lösenord:</strong> {html.escape(new_password)}</p>"
+        f'<p><a href="{login_url}">BullEye AI</a></p>'
+        "<p>Logga in och byt lösenord direkt efter inloggning.</p>"
+        "</body></html>"
+    )
     if get_brevo_api_key() and get_brevo_sender_email():
-        ok, err = send_mail_via_brevo_api([email], subject, body)
+        ok, err = send_mail_via_brevo_api([email], subject, body, html_body)
         if ok:
             logger.info("RESET MAIL SENT VIA BREVO API TO: %s", email)
             return True, ""
@@ -8278,10 +8299,12 @@ Logga in och byt lösenord direkt efter inloggning.
         logger.warning("Reset mail not sent: SMTP credentials missing")
         return False, "Meddelandetjänsten är inte konfigurerad på servern."
 
-    msg = MIMEText(body)
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = email
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
         server = smtplib.SMTP(get_smtp_host(), get_smtp_port())
