@@ -8235,7 +8235,8 @@ Logga in och byt lösenord direkt efter inloggning.
         ok, err = send_mail_via_brevo_api([email], subject, body)
         if ok:
             logger.info("RESET MAIL SENT VIA BREVO API TO: %s", email)
-        return ok, err
+            return True, ""
+        logger.warning("Brevo API reset failed; trying SMTP fallback: %s", err)
 
     sender = get_email_user()
     password = get_email_password()
