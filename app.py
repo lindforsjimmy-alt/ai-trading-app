@@ -6061,6 +6061,13 @@ def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, incl
         decision, reason = portfolio_ai_decision(pl_pct, current_price, avg_price, symbol, pf_risk, pf_strategy)
         decision = normalize_portfolio_decision(decision)
 
+        sell_targets = session.setdefault("portfolio_sell_targets", {})
+        if decision != "SÄLJ":
+            sell_targets.pop(symbol, None)
+        elif symbol not in sell_targets:
+            initial_sell_qty = get_ai_recommended_sell_qty(s, decision, pl_pct)
+            sell_targets[symbol] = {"initial_qty": qty, "target_qty": initial_sell_qty}
+
         s["t"] = symbol
         s["price"] = current_price
         s["cost"] = round(cost, 2)
@@ -6070,7 +6077,18 @@ def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, incl
         s["decision"] = decision
         s["reason"] = reason
         s["signal"] = decision
-        s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
+        if decision == "SÄLJ" and symbol in sell_targets:
+            sell_target = sell_targets[symbol]
+            sold_since_target = max(0, int(sell_target["initial_qty"]) - qty)
+            remaining_sell_qty = max(0, int(sell_target["target_qty"]) - sold_since_target)
+            if remaining_sell_qty <= 0:
+                decision = "AVVAKTA"
+                reason = "Säljmålet är redan uppnått. Invändta ny signal."
+            s["recommended_sell_qty"] = min(qty, remaining_sell_qty)
+        else:
+            s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
+        s["decision"] = decision
+        s["reason"] = reason
         buy_targets = session.setdefault("portfolio_buy_targets", {})
         target_qty = buy_targets.get(symbol)
         if decision == "KÖP MER" and target_qty is None:
