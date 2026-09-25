@@ -44,7 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ===== CONFIG / APP SETUP =====
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
+BASE_URL = os.environ.get("BASE_URL", "https://ai-trading-app-r6jh.onrender.com").strip().rstrip("/")
 
 def _is_configured(name):
     return bool((os.environ.get(name) or "").strip())
