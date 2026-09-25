@@ -8711,13 +8711,16 @@ def generate_watch_analysis(s):
     return analysis_html
 
 
-def enrich_with_buy_plan(candidates, total_capital_usd, usd_sek_rate=10.5, risk_profile="medium"):
+def enrich_with_buy_plan(candidates, total_capital_usd, usd_sek_rate=10.5, risk_profile="medium", owned_qty_by_symbol=None):
     """
     Attach AI-driven buy quantity suggestions to each candidate.
     Allocation is score-weighted and capped by available capital share per candidate.
     """
     if not candidates:
         return
+
+    owned_qty_by_symbol = owned_qty_by_symbol or {}
+    buy_targets = session.setdefault("dashboard_buy_targets", {})
 
     try:
         capital = float(total_capital_usd)
@@ -8771,6 +8774,16 @@ def enrich_with_buy_plan(candidates, total_capital_usd, usd_sek_rate=10.5, risk_
             qty = int(allocation_usd // price)
             if s.get("signal") == "KÖP" and qty == 0 and allocation_usd >= (price * 0.5):
                 qty = 1
+
+        symbol = (s.get("t") or "").strip().upper()
+        current_qty = int(owned_qty_by_symbol.get(symbol) or 0)
+        if s.get("signal") == "KÖP":
+            if symbol not in buy_targets:
+                buy_targets[symbol] = current_qty + qty
+            qty = max(0, int(buy_targets[symbol]) - current_qty)
+            if qty == 0 and current_qty >= int(buy_targets[symbol]):
+                s["signal"] = "AVVAKTA"
+                s["recommendation_status"] = "Målposition nådd"
 
         usd_value = round(qty * price, 2) if price > 0 else 0.0
         sek_value = round(usd_value * float(usd_sek_rate), 2)
@@ -9606,7 +9619,12 @@ def dashboard():
     capital_usd_for_plan = convert_capital_to_usd(amount, capital_currency, usd_sek_rate, usd_eur_rate)
 
     # Add quantity recommendations used by stock/crypto cards in dashboard.
-    enrich_with_buy_plan(stocks + crypto, capital_usd_for_plan, usd_sek_rate, ai_risk)
+    owned_qty_by_symbol = {
+        (item.get("t") or "").strip().upper(): int(item.get("qty") or 0)
+        for item in pf
+        if item.get("t")
+    }
+    enrich_with_buy_plan(stocks + crypto, capital_usd_for_plan, usd_sek_rate, ai_risk, owned_qty_by_symbol)
 
     # ✅ HANDLE BUY/SELL after recommendation lists are built
     if request.method == "POST":
