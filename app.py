@@ -5977,10 +5977,13 @@ def get_ai_recommended_sell_qty(position, decision, pl_pct):
     return 1
 
 
-def get_ai_recommended_buy_more_qty(position, decision, pl_pct):
+def get_ai_recommended_buy_more_qty(position, decision, pl_pct, target_qty=None):
     qty = int(position.get("qty") or 0)
     if qty <= 0 or decision != "KÖP MER":
         return 0
+
+    if target_qty is not None:
+        return max(0, int(target_qty) - qty)
 
     if pl_pct >= 10:
         factor = 0.2
@@ -6068,7 +6071,18 @@ def build_portfolio_view(portfolio_rows, ranked_rows, pf_strategy, pf_risk, incl
         s["reason"] = reason
         s["signal"] = decision
         s["recommended_sell_qty"] = get_ai_recommended_sell_qty(s, decision, pl_pct)
-        s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
+        buy_targets = session.setdefault("portfolio_buy_targets", {})
+        target_qty = buy_targets.get(symbol)
+        if decision == "KÖP MER" and target_qty is None:
+            initial_add_qty = get_ai_recommended_buy_more_qty(s, decision, pl_pct)
+            target_qty = qty + initial_add_qty
+            buy_targets[symbol] = target_qty
+        if decision == "KÖP MER" and target_qty is not None and qty >= int(target_qty):
+            decision = "AVVAKTA"
+            reason = "Målpositionen är nådd efter senaste köp. Invändta ny signal."
+        s["decision"] = decision
+        s["reason"] = reason
+        s["recommended_buy_qty"] = get_ai_recommended_buy_more_qty(s, decision, pl_pct, target_qty)
 
         if decision == "SÄLJ" and s["recommended_sell_qty"] >= qty:
             s["sell_recommendation_text"] = "AI rekommenderar: Sälj allt"
