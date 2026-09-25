@@ -1776,12 +1776,14 @@
 
         <div class="selection-note">
             {% if priority == "stocks" %}
-            Visar {{ stocks|length }} av {{ top_n }} valda aktier (KÖP först, annars AVVAKTA KÖP).
+            Visar {{ stocks|length }} av {{ top_n }} valda aktier (KÖP först, därefter högst rankade
+            bevakningskandidater).
             {% elif priority == "crypto" %}
-            Visar {{ crypto|length }} av {{ top_n }} valda kryptokandidater (KÖP först, annars AVVAKTA KÖP).
+            Visar {{ crypto|length }} av {{ top_n }} valda kryptokandidater (KÖP först, därefter högst rankade
+            bevakningskandidater).
             {% else %}
             Visar {{ stocks|length }} av {{ top_n }} aktier och {{ crypto|length }} av {{ top_n }} krypto (KÖP först,
-            annars AVVAKTA KÖP).
+            därefter högst rankade bevakningskandidater).
             {% endif %}
             {% if (priority == "stocks" and stocks|length < top_n) or (priority=="crypto" and crypto|length < top_n) or
                 (priority=="mix" and (stocks|length < top_n or crypto|length < top_n)) %} <br>Notis: Antalet kan bli
@@ -3492,12 +3494,24 @@
                     </svg>Registrerade Admin ({{ admin_users|length }})</h3>
                 {% for email in admin_users %}
                 <div class="asset-box">
-                    <b>{{ email }}</b><br><br>
+                    <b>{{ email }}</b>
+                    {% if email|lower == 'lindfors.jimmy@outlook.com' %}
+                    <span style="color:#70E000; margin-left:8px;">Superadmin · låst</span>
+                    {% endif %}
+                    <br><br>
                     <form method="POST" style="display:flex; gap:8px; flex-wrap:wrap;">
                         <input type="hidden" name="active_tab" value="users">
                         <button type="submit" name="admin_reset_password" value="{{ email }}"
                             style="background: rgba(59, 130, 246, 0.22); border-color: rgba(59, 130, 246, 0.36);">Nytt
                             lösenord</button>
+                        {% if email|lower != 'lindfors.jimmy@outlook.com' %}
+                        <button type="submit" name="admin_demote" value="{{ email }}"
+                            style="background: rgba(244, 180, 0, 0.18); border-color: rgba(244, 180, 0, 0.34);">Ändra
+                            till User</button>
+                        <button type="submit" name="admin_delete" value="{{ email }}"
+                            style="background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.28);">Radera
+                            användare</button>
+                        {% endif %}
                     </form>
                 </div>
                 {% else %}

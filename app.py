@@ -3015,6 +3015,40 @@ def is_admin_email(email):
     target = (email or "").strip().lower()
     return target in configured_superadmin_emails() or target in load_extra_admin_emails()
 
+
+def is_superadmin_email(email):
+    return (email or "").strip().lower() in configured_superadmin_emails()
+
+
+def remove_admin_email(email):
+    target = (email or "").strip().lower()
+    if not target or is_superadmin_email(target):
+        return False
+    if db_enabled():
+        try:
+            with db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE users SET role = 'user' WHERE LOWER(email) = LOWER(%s) AND role = 'admin'",
+                        (target,),
+                    )
+                    changed = cur.rowcount > 0
+                conn.commit()
+            return changed
+        except Exception as ex:
+            logger.warning("DB admin demotion failed for %s: %s", target, ex)
+            return False
+    try:
+        lines = [line.strip().lower() for line in open(ADMINS_FILE).readlines()]
+        retained = [line for line in lines if line and line != target]
+        if retained == lines:
+            return False
+        with open(ADMINS_FILE, "w") as file:
+            file.writelines(f"{line}\n" for line in retained)
+        return True
+    except OSError:
+        return False
+
 def check_user(email, password):
     if db_enabled():
         rec = db_find_user(email)
@@ -9129,10 +9163,20 @@ def dashboard():
                 session["users_msg"] = f"ℹ️ Kunde inte neka {target}"
             return redirect("/dashboard?tab=users")
 
+        if "admin_demote" in request.form:
+            target = (request.form.get("admin_demote") or "").strip().lower()
+            if is_superadmin_email(target):
+                session["users_msg"] = "⚠️ Superadmin kan inte ändras till user"
+            elif target and remove_admin_email(target):
+                session["users_msg"] = f"✅ Ändrade {target} till user"
+            else:
+                session["users_msg"] = f"ℹ️ Kunde inte ändra {target} till user"
+            return redirect("/dashboard?tab=users")
+
         if "admin_delete" in request.form:
             target = (request.form.get("admin_delete") or "").strip()
-            if is_admin_email(target):
-                session["users_msg"] = "⚠️ Admin-kontot kan inte tas bort"
+            if is_superadmin_email(target):
+                session["users_msg"] = "⚠️ Superadmin kan inte tas bort"
             elif target and delete_registered_user(target):
                 session["users_msg"] = f"🗑️ Tog bort {target}"
             else:
