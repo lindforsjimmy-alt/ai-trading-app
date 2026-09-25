@@ -147,6 +147,8 @@ LEARNING_MIN_OUTCOMES = _env_int("LEARNING_MIN_OUTCOMES", 25)
 LEARNING_MAX_ROWS = _env_int("LEARNING_MAX_ROWS", 500)
 BUY_SCORE_THRESHOLD = _env_int("BUY_SCORE_THRESHOLD", 65)
 WATCH_SCORE_THRESHOLD = _env_int("WATCH_SCORE_THRESHOLD", 55)
+CRYPTO_BUY_SCORE_THRESHOLD = _env_int("CRYPTO_BUY_SCORE_THRESHOLD", 62)
+CRYPTO_WATCH_SCORE_THRESHOLD = _env_int("CRYPTO_WATCH_SCORE_THRESHOLD", 52)
 LEARNING_PROFILE_OVERLAY_ENABLED = _env_bool("LEARNING_PROFILE_OVERLAY_ENABLED", True)
 LEARNING_PROFILE_OVERLAY_MIN_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_MIN_SAMPLES", 30)
 LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES = _env_int("LEARNING_PROFILE_OVERLAY_RAMP_SAMPLES", 120)
@@ -4730,12 +4732,14 @@ def get_stop_loss(price, risk):
     return round(price * 0.90, 2)
 
 # ===== AI =====
-def get_signal(price, score=None):
+def get_signal(price, score=None, asset_type=None):
 
     if score is not None:
-        if score >= BUY_SCORE_THRESHOLD:
+        buy_threshold = CRYPTO_BUY_SCORE_THRESHOLD if asset_type == "crypto" else BUY_SCORE_THRESHOLD
+        watch_threshold = CRYPTO_WATCH_SCORE_THRESHOLD if asset_type == "crypto" else WATCH_SCORE_THRESHOLD
+        if score >= buy_threshold:
             return "KÖP"
-        elif score >= WATCH_SCORE_THRESHOLD:
+        elif score >= watch_threshold:
             return "AVVAKTA KÖP"
         elif score <= 35:
             return "SÄLJ"
@@ -5147,9 +5151,10 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     seen_assets = set()
     for asset in assets:
         sym = (asset.get("t") or "").strip().upper()
-        if not sym or sym in seen_assets:
+        asset_key = ((asset.get("type") or "stock").strip().lower(), sym)
+        if not sym or asset_key in seen_assets:
             continue
-        seen_assets.add(sym)
+        seen_assets.add(asset_key)
         deduped_assets.append(asset)
 
     assets = sorted(
@@ -5166,6 +5171,15 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
     crypto_reserved = min(len(crypto_pool), max(8, min(AI_CRYPTO_LIMIT, int(MAX_DEEP_ANALYSIS_CANDIDATES * 0.25))))
     stock_cap = max(0, MAX_DEEP_ANALYSIS_CANDIDATES - crypto_reserved)
     assets = stock_pool[:stock_cap] + crypto_pool[:crypto_reserved]
+    crypto_diagnostics = {
+        "pool": len(crypto_pool),
+        "reserved": crypto_reserved,
+        "not_tradeable": 0,
+        "no_history": 0,
+        "scored": 0,
+        "buy": 0,
+        "watch": 0,
+    }
 
     for s in assets:
         
@@ -5173,6 +5187,8 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
             s["type"] = "stock"
 
         if not is_tradeable(s):
+            if s.get("type") == "crypto":
+                crypto_diagnostics["not_tradeable"] += 1
             continue
 
         price = s.get("price", 0)
@@ -5202,6 +5218,10 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
                 prices = [p for p in prices if p]
             except:
                 prices = []
+
+        if s.get("type") == "crypto" and not prices:
+            crypto_diagnostics["no_history"] += 1
+            continue
 
         # ✅ indikatorer (MÅSTE KOMMA FÖRST)
         trend_score = get_trend_score_from_history(prices)
@@ -5372,7 +5392,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         s["affordability_penalty"] = 0
         s["long_trend"] = get_trend_score_from_history(prices)
         s["type_bias"] = type_bias
-        s["signal"] = get_signal(price, s["score"])
+        s["signal"] = get_signal(price, s["score"], asset_type)
         s["reason"] = get_reason(s["signal"], price, s["t"], s)
         s["summary"] = get_summary(s)
 
@@ -5387,6 +5407,12 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         s["confidence"] = min(100, int(confidence))
 
         result.append(s)
+        if asset_type == "crypto":
+            crypto_diagnostics["scored"] += 1
+            if s["signal"] == "KÖP":
+                crypto_diagnostics["buy"] += 1
+            elif s["signal"] == "AVVAKTA KÖP":
+                crypto_diagnostics["watch"] += 1
 
     result = sorted(
         result,
@@ -5460,6 +5486,7 @@ def run_daily_ai(strategy="short", risk="medium", capital=10000, force_refresh=F
         len(result),
     )
     logger.info("AI score distribution | %s", score_bands)
+    logger.info("Crypto diagnostics | %s", crypto_diagnostics)
     logger.info(
         "Hybrid scan mix | scanned=%s core=%s rotation=%s news_trigger=%s | learning news_mult=%s rotation_mult=%s sample=%s",
         len(scan_plan.get("symbols", [])),
