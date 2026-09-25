@@ -322,6 +322,18 @@ DATA_FILE = "stock_data/my_trades.txt"
 USERS_FILE = "stock_data/users.txt"
 ADMIN_EMAILS = {"lindfors.jimmy@outlook.com"}
 ADMINS_FILE = "stock_data/admins.txt"
+
+
+def configured_superadmin_emails():
+    return {
+        email.strip().lower()
+        for email in (
+            *ADMIN_EMAILS,
+            os.getenv("JAI_SUPERADMIN_EMAIL", ""),
+            os.getenv("JAI_MOBILE_ADMIN_EMAIL", ""),
+        )
+        if email and email.strip()
+    }
 USER_SETTINGS_FILE = "stock_data/user_settings.json"
 APP_SETTINGS_FILE = "stock_data/app_settings.json"
 AI_PENDING_OUTCOMES_FILE = "stock_data/ai_pending_outcomes.jsonl"
@@ -3001,7 +3013,7 @@ def add_admin_email(email):
 
 def is_admin_email(email):
     target = (email or "").strip().lower()
-    return target in ADMIN_EMAILS or target in load_extra_admin_emails()
+    return target in configured_superadmin_emails() or target in load_extra_admin_emails()
 
 def check_user(email, password):
     if db_enabled():
@@ -7623,19 +7635,17 @@ def forgot():
         else:
             new_password = generate_temp_password(7)
             new_hash = hash_password(new_password)
-
-            updated, new_lines = build_updated_user_lines(email, new_hash)
-
-            if not updated:
-                msg = "❌ Kunde inte uppdatera användaren."
-            else:
-                ok, err = send_reset_email(email, new_password)
-                if ok:
+            ok, err = send_reset_email(email, new_password)
+            if ok:
+                updated, new_lines = build_updated_user_lines(email, new_hash)
+                if updated:
                     if new_lines is not None:
                         open(USERS_FILE, "w").writelines(new_lines)
                     msg = f"✅ Meddelande skickat till {email}. Ett nytt lösenord på 7 tecken har genererats."
                 else:
-                    msg = f"❌ {err}"
+                    msg = "❌ Mejlet skickades, men lösenordet kunde inte sparas. Försök igen eller kontakta admin."
+            else:
+                msg = f"❌ {err}"
 
     return f"""
     <html>
@@ -7847,7 +7857,12 @@ def get_smtp_port():
 
 
 def get_email_user():
-    return (os.environ.get("EMAIL_USER") or os.environ.get("SMTP_USER") or "").strip()
+    return (
+        os.environ.get("EMAIL_USER")
+        or os.environ.get("SMTP_USER")
+        or os.environ.get("SMTP_USERNAME")
+        or ""
+    ).strip()
 
 
 def get_email_password():
@@ -7859,7 +7874,12 @@ def get_brevo_api_key():
 
 
 def get_brevo_sender_email():
-    return (os.environ.get("BREVO_SENDER_EMAIL") or "").strip()
+    return (
+        os.environ.get("BREVO_SENDER_EMAIL")
+        or os.environ.get("SMTP_FROM_EMAIL")
+        or os.environ.get("EMAIL_USER")
+        or ""
+    ).strip()
 
 
 def get_brevo_sender_name():
@@ -8199,13 +8219,6 @@ def send_reset_email(email, new_password):
         logger.warning("Reset mail blocked because EMAIL_ENABLED is disabled")
         return False, "Meddelandefunktionen är tillfälligt avstängd (EMAIL_ENABLED=0). Kontakta admin."
 
-    sender = get_email_user()
-    password = get_email_password()
-
-    if not sender or not password:
-        logger.warning("Reset mail not sent: EMAIL_USER/EMAIL_PASSWORD missing")
-        return False, "Meddelandetjänsten är inte konfigurerad på servern (EMAIL_USER/EMAIL_PASSWORD saknas)."
-
     body = f"""
 Hej,
 
@@ -8217,13 +8230,26 @@ Ditt nya tillfälliga lösenord är:
 Logga in och byt lösenord direkt efter inloggning.
 """
 
+    subject = "BullEye AI - Nytt lösenord"
+    if get_brevo_api_key() and get_brevo_sender_email():
+        ok, err = send_mail_via_brevo_api([email], subject, body)
+        if ok:
+            logger.info("RESET MAIL SENT VIA BREVO API TO: %s", email)
+        return ok, err
+
+    sender = get_email_user()
+    password = get_email_password()
+    if not sender or not password:
+        logger.warning("Reset mail not sent: SMTP credentials missing")
+        return False, "Meddelandetjänsten är inte konfigurerad på servern."
+
     msg = MIMEText(body)
-    msg["Subject"] = "BullEye AI - Nytt lösenord"
+    msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = email
 
     try:
-        server = smtplib.SMTP("smtp.office365.com", 587)
+        server = smtplib.SMTP(get_smtp_host(), get_smtp_port())
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
